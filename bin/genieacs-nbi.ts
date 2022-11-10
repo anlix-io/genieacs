@@ -24,6 +24,7 @@ import * as server from "../lib/server";
 import { listener } from "../lib/nbi";
 import * as db from "../lib/db";
 import * as extensions from "../lib/extensions";
+import { connectCache, disconnectCache } from "../lib/cache"
 import { version as VERSION } from "../package.json";
 
 logger.init("nbi", VERSION);
@@ -34,6 +35,7 @@ const SERVICE_PORT = config.get("NBI_PORT") as number;
 function exitWorkerGracefully(): void {
   setTimeout(exitWorkerUngracefully, 5000).unref();
   Promise.all([
+    disconnectCache(),
     db.disconnect(),
     extensions.killAll(),
     cluster.worker.disconnect(),
@@ -102,7 +104,13 @@ if (!cluster.worker) {
     listener(req, res);
   };
 
-  const initPromise = db
+  const cachePromise = connectCache().catch((err) => {
+    setTimeout(() => {
+      throw err;
+    });
+  });
+
+  const dbPromise = db
     .connect()
     .then(() => {
       server.start(options, _listener);
@@ -112,6 +120,8 @@ if (!cluster.worker) {
         throw err;
       });
     });
+
+  const initPromise = Promise.all([cachePromise, dbPromise]);
 
   process.on("SIGINT", () => {
     stopping = true;

@@ -24,6 +24,7 @@ import * as server from "../lib/server";
 import * as cwmp from "../lib/cwmp";
 import * as db from "../lib/db";
 import * as extensions from "../lib/extensions";
+import { connectCache, disconnectCache } from "../lib/cache"
 import { version as VERSION } from "../package.json";
 
 logger.init("cwmp", VERSION);
@@ -34,6 +35,7 @@ const SERVICE_PORT = config.get("CWMP_PORT") as number;
 function exitWorkerGracefully(): void {
   setTimeout(exitWorkerUngracefully, 5000).unref();
   Promise.all([
+    disconnectCache(),
     db.disconnect(),
     extensions.killAll(),
     cluster.worker.disconnect(),
@@ -98,7 +100,13 @@ if (!cluster.worker) {
     server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
   });
 
-  const initPromise = db
+  const cachePromise = connectCache().catch((err) => {
+    setTimeout(() => {
+      throw err;
+    });
+  });
+
+  const dbPromise = db
     .connect()
     .then(() => {
       server.start(options, cwmp.listener);
@@ -108,6 +116,8 @@ if (!cluster.worker) {
         throw err;
       });
     });
+
+  const initPromise = Promise.all([cachePromise, dbPromise]);
 
   process.on("SIGINT", () => {
     initPromise.finally(() => {

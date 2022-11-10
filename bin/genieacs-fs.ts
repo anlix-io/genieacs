@@ -23,6 +23,7 @@ import * as cluster from "../lib/cluster";
 import * as server from "../lib/server";
 import { listener } from "../lib/fs";
 import * as db from "../lib/db";
+import { connectCache, disconnectCache } from "../lib/cache"
 import { version as VERSION } from "../package.json";
 
 logger.init("fs", VERSION);
@@ -32,7 +33,11 @@ const SERVICE_PORT = config.get("FS_PORT") as number;
 
 function exitWorkerGracefully(): void {
   setTimeout(exitWorkerUngracefully, 5000).unref();
-  Promise.all([db.disconnect(), cluster.worker.disconnect()]).catch(
+  Promise.all([
+    disconnectCache(),
+    db.disconnect(), 
+    cluster.worker.disconnect()]
+  ).catch(
     exitWorkerUngracefully
   );
 }
@@ -97,7 +102,13 @@ if (!cluster.worker) {
     void listener(req, res);
   };
 
-  const initPromise = db
+  const cachePromise = connectCache().catch((err) => {
+    setTimeout(() => {
+      throw err;
+    });
+  });
+
+  const dbPromise = db
     .connect()
     .then(() => {
       server.start(options, _listener);
@@ -107,6 +118,8 @@ if (!cluster.worker) {
         throw err;
       });
     });
+
+  const initPromise = Promise.all([cachePromise, dbPromise]);
 
   process.on("SIGINT", () => {
     stopping = true;

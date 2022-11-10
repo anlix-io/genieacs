@@ -17,7 +17,7 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { Collection } from "mongodb";
+import { MongoClient, Collection, Db } from "mongodb";
 import { onConnect } from "./db";
 import * as config from "./config";
 import { Cache } from "./mongodb-types";
@@ -26,11 +26,20 @@ const CLOCK_SKEW_TOLERANCE = 30000;
 const MAX_CACHE_TTL = +config.get("MAX_CACHE_TTL");
 
 let cacheCollection: Collection<Cache>;
+let mongoClient: Promise<MongoClient>;
 
-onConnect(async (db) => {
+export async function connectCache(): Promise<void> {
+  mongoClient = MongoClient.connect("mongodb://127.0.0.1:27018/genieacs");
+
+  const client = await mongoClient;
+  const db = client.db();
   cacheCollection = db.collection("cache");
   await cacheCollection.createIndex({ expire: 1 }, { expireAfterSeconds: 0 });
-});
+}
+
+export async function disconnectCache(): Promise<void> {
+  if (mongoClient) await (await mongoClient).close();
+}
 
 export async function get(key: string): Promise<string> {
   const res = await cacheCollection.findOne({ _id: key });
