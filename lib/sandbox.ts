@@ -51,7 +51,7 @@ function runExtension(sessionContext, key, extCall): Promise<Fault> {
   }
 
   let prom = re.get(key);
-  if (!prom) {
+  if (prom == null) {
     re.set(
       key,
       (prom = new Promise((resolve, reject) => {

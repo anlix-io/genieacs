@@ -65,6 +65,7 @@ import { getSocketEndpoints } from "./server";
 import { metricsExporter } from "./metrics";
 import { sendFlashmanInformRequest } from './flashman'
 import * as redisClient from './redis'
+import { EventEmitter } from "events";
 
 const gzipPromisified = promisify(zlib.gzip);
 const deflatePromisified = promisify(zlib.deflate);
@@ -948,91 +949,103 @@ async function sendAcsRequest(
   return writeResponse(sessionContext, res);
 }
 
-// When socket closes, store active sessions in cache
-export function onConnection(socket: Socket): void {
-  metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'open' }).inc()
-  connectionsInfo.set(socket, { time: Date.now(), type: 2 });
+function once(
+  emitter: EventEmitter,
+  event: string,
+  timeout: number
+): Promise<unknown[]> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Event ${event} timed out after ${timeout} ms`));
+    }, timeout);
 
-  socket.on("close", async () => {
-    metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'close' }).inc()
-    const sessionContext = currentSessions.get(socket);
-    if (!sessionContext) return;
-    metricsExporter.totalConnectionTime.labels({ server: 'cwmp' }).observe(Date.now() - sessionContext.timestamp)
-    currentSessions.delete(socket);
-    if (sessionContext.authState !== 2) {
-      logger.accessError({
-        message: "Authentication failure",
-        sessionContext: sessionContext,
-      });
-      return;
-    }
-
-    const now = Date.now();
-
-    const lastActivity = sessionContext.lastActivity;
-    const timeoutMsg = {
-      sessionContext: sessionContext,
-      message: "Session timeout",
-      sessionTimestamp: sessionContext.timestamp,
-    };
-
-    const timeout =
-      sessionContext.lastActivity + sessionContext.timeout * 1000 - now;
-
-    if (timeout <= 0) {
-      logger.accessError(timeoutMsg);
-      // TODO it's possible that lock would have already been expired
-      await endSession(sessionContext);
-      return;
-    }
-
-    setTimeout(async () => {
-      const sessionContextString = await cache.get(
-        `session_${sessionContext.sessionId}`
-      );
-      if (!sessionContextString) return;
-      const _sessionContext = await session.deserialize(sessionContextString);
-      if (_sessionContext.lastActivity === lastActivity) {
-        logger.accessError(timeoutMsg);
-        await endSession(sessionContext);
-      }
-    }, timeout + 1000).unref();
-
-    if (sessionContext.state === 0) return;
-
-    const sessionContextString = await session.serialize(sessionContext);
-    await cache.set(
-      `session_${sessionContext.sessionId}`,
-      sessionContextString,
-      Math.ceil(timeout / 1000) + 3
-    );
+    emitter.once(event, (...args: unknown[]) => {
+      clearTimeout(timer);
+      resolve(args);
+    });
   });
 }
 
-export function onClientError(err: Error, socket: Socket): void {
-  const remoteAddress = getSocketEndpoints(socket).remoteAddress;
-  localCache
-    .getCurrentSnapshot()
-    .then((cacheSnapshot) => {
-      const debugEnabled = !!localCache.getConfig(
-        cacheSnapshot,
-        "cwmp.debug",
-        {
-          remoteAddress: remoteAddress,
-        },
-        Date.now(),
-        (e) => {
-          if (Array.isArray(e) && e[0] === "FUNC" && e[1] === "REMOTE_ADDRESS")
-            return remoteAddress;
-          return e;
-        }
-      );
+function setTimeoutPromise(delay: number, ref = true): Promise<void> {
+  return new Promise((resolve) => {
+    const timerId = setTimeout(resolve, delay);
+    if (!ref) timerId.unref();
+  });
+}
 
-      if (debugEnabled) debug.clientError(remoteAddress, err);
-    })
-    .catch((err) => {
-      throw err;
+// When socket closes, store active sessions in cache
+export async function onConnection(socket: Socket): Promise<void> {
+  metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'open' }).inc()
+  connectionsInfo.set(socket, { time: Date.now(), type: 2 });
+
+  await once(socket, "close", 300000);
+  metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'close' }).inc()
+  const sessionContext = currentSessions.get(socket);
+  if (!sessionContext) return;
+  metricsExporter.totalConnectionTime.labels({ server: 'cwmp' }).observe(Date.now() - sessionContext.timestamp)
+  currentSessions.delete(socket);
+  if (sessionContext.authState !== 2) {
+    logger.accessError({
+      message: "Authentication failure",
+      sessionContext: sessionContext,
     });
+    return;
+  }
+
+  const now = Date.now();
+
+  const lastActivity = sessionContext.lastActivity;
+  const timeoutMsg = {
+    sessionContext: sessionContext,
+    message: "Session timeout",
+    sessionTimestamp: sessionContext.timestamp,
+  };
+
+  const timeout =
+    sessionContext.lastActivity + sessionContext.timeout * 1000 - now;
+
+  if (timeout <= 0) {
+    logger.accessError(timeoutMsg);
+    // TODO it's possible that lock would have already been expired
+    await endSession(sessionContext);
+    return;
+  }
+
+  await cache.set(
+    `session_${sessionContext.sessionId}`,
+    await session.serialize(sessionContext),
+    Math.ceil(timeout / 1000) + 3
+  );
+
+  await setTimeoutPromise(timeout + 1000, false);
+  const sessionStr = await cache.get(`session_${sessionContext.sessionId}`);
+  if (!sessionStr) return;
+
+  const _sessionContext = await session.deserialize(sessionStr);
+  if (_sessionContext.lastActivity === lastActivity) {
+    logger.accessError(timeoutMsg);
+    await endSession(sessionContext);
+  }
+}
+
+export async function onClientError(err: Error, socket: Socket): Promise<void> {
+  const remoteAddress = getSocketEndpoints(socket).remoteAddress;
+  const cacheSnapshot = await localCache.getCurrentSnapshot();
+  const debugEnabled = !!localCache.getConfig(
+    cacheSnapshot,
+    "cwmp.debug",
+    {
+      remoteAddress: remoteAddress,
+    },
+    Date.now(),
+    (e) => {
+      if (Array.isArray(e) && e[0] === "FUNC" && e[1] === "REMOTE_ADDRESS")
+        return remoteAddress;
+      return e;
+    }
+  );
+
+  if (debugEnabled) debug.clientError(remoteAddress, err);
 }
 
 
@@ -1400,32 +1413,20 @@ async function processRequest(
   }
 }
 
-export function listener(
+export async function listener(
   httpRequest: IncomingMessage,
   httpResponse: ServerResponse
-): void {
-
+): Promise<void> {
   stats.concurrentRequests += 1;
   metricsExporter.totalRequests.labels({ server: 'cwmp' }).inc();
-
-  listenerAsync(httpRequest, httpResponse)
-    .then(() => {
-      stats.concurrentRequests -= 1;
-    })
-    .catch((err) => {
-      currentSessions.delete(httpRequest.socket);
-      stats.concurrentRequests -= 1;
-      setTimeout(() => {
-        throw err;
-      });
-      try {
-        httpRequest.socket.unref();
-        httpResponse.writeHead(500, { Connection: "close" });
-        httpResponse.end(`${err.name}: ${err.message}`);
-      } catch (err) {
-        // Ignore
-      }
-    });
+  try {
+    await listenerAsync(httpRequest, httpResponse);
+  } catch (err) {
+    currentSessions.delete(httpRequest.socket);
+    throw err;
+  } finally {
+    stats.concurrentRequests -= 1;
+  }
 }
 
 async function clientError(

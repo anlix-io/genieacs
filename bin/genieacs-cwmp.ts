@@ -96,7 +96,7 @@ if (!cluster.worker) {
       exception: err,
       pid: process.pid,
     });
-    server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
+    server.stop(false).then(exitWorkerGracefully).catch(exitWorkerUngracefully);
   });
 
   const initDBPromise = db.connect();
@@ -114,13 +114,19 @@ if (!cluster.worker) {
 
   process.on("SIGINT", () => {
     initPromise.finally(() => {
-      server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
+      server
+        .stop(false)
+        .then(exitWorkerGracefully)
+        .catch(exitWorkerUngracefully);
     });
   });
 
   process.on("SIGTERM", () => {
     initPromise.finally(() => {
-      server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
+      server
+        .stop(false)
+        .then(exitWorkerGracefully)
+        .catch(exitWorkerUngracefully);
     });
   });
 }

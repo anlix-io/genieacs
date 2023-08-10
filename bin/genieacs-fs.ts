@@ -80,8 +80,6 @@ if (!cluster.worker) {
     timeout: 30000,
   };
 
-  let stopping = false;
-
   process.on("uncaughtException", (err) => {
     if ((err as NodeJS.ErrnoException).code === "ERR_IPC_DISCONNECTED") return;
     logger.error({
@@ -89,21 +87,15 @@ if (!cluster.worker) {
       exception: err,
       pid: process.pid,
     });
-    stopping = true;
     server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
   });
-
-  const _listener = (req, res): void => {
-    if (stopping) res.setHeader("Connection", "close");
-    void listener(req, res);
-  };
 
   const initDBPromise = db.connect();
   const initRedisPromise = redisClient.connect();
 
   const initPromise = Promise.all([initDBPromise, initRedisPromise])
     .then(() => {
-      server.start(options, _listener);
+      server.start(options, listener);
     })
     .catch((err) => {
       setTimeout(() => {
@@ -112,14 +104,12 @@ if (!cluster.worker) {
     });
 
   process.on("SIGINT", () => {
-    stopping = true;
     initPromise.finally(() => {
       server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
     });
   });
 
   process.on("SIGTERM", () => {
-    stopping = true;
     initPromise.finally(() => {
       server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
     });
