@@ -24,7 +24,7 @@ import * as crypto from "crypto";
 import { Socket } from "net";
 import * as auth from "./auth";
 import * as config from "./config";
-import * as common from "./common";
+import { generateDeviceId, once, setTimeoutPromise } from "./util";
 import * as soap from "./soap";
 import * as session from "./session";
 import {
@@ -33,9 +33,20 @@ import {
   extractParams,
 } from "./common/expression/util";
 import * as cache from "./cache";
-import * as localCache from "./local-cache";
-import * as db from "./db";
 import * as redis from "./redis"
+import * as localCache from "./cwmp/local-cache";
+import {
+  clearTasks,
+  deleteFault,
+  deleteOperation,
+  fetchDevice,
+  getDueTasks,
+  getFaults,
+  getOperations,
+  saveDevice,
+  saveFault,
+  saveOperation,
+} from "./cwmp/db";
 import * as logger from "./logger";
 import * as scheduling from "./scheduling";
 import Path from "./common/path";
@@ -65,7 +76,6 @@ import { getSocketEndpoints } from "./server";
 import { metricsExporter } from "./metrics";
 import { sendFlashmanInformRequest } from './flashman'
 import * as redisClient from './redis'
-import { EventEmitter } from "events";
 
 const gzipPromisified = promisify(zlib.gzip);
 const deflatePromisified = promisify(zlib.deflate);
@@ -813,7 +823,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
   const promises = [];
 
   promises.push(
-    db.saveDevice(
+    saveDevice(
       sessionContext.deviceId,
       sessionContext.deviceData,
       sessionContext.new,
@@ -826,14 +836,14 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
       saveCache = true;
       if (sessionContext.operations[k]) {
         promises.push(
-          db.saveOperation(
+          saveOperation(
             sessionContext.deviceId,
             k,
             sessionContext.operations[k]
           )
         );
       } else {
-        promises.push(db.deleteOperation(sessionContext.deviceId, k));
+        promises.push(deleteOperation(sessionContext.deviceId, k));
       }
     }
   }
@@ -841,7 +851,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
   if (sessionContext.doneTasks?.length) {
     saveCache = true;
     promises.push(
-      db.clearTasks(sessionContext.deviceId, sessionContext.doneTasks)
+      clearTasks(sessionContext.deviceId, sessionContext.doneTasks)
     );
   }
 
@@ -851,10 +861,10 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
       if (sessionContext.faults[k]) {
         sessionContext.faults[k].retries = sessionContext.retries[k];
         promises.push(
-          db.saveFault(sessionContext.deviceId, k, sessionContext.faults[k])
+          saveFault(sessionContext.deviceId, k, sessionContext.faults[k])
         );
       } else {
-        promises.push(db.deleteFault(sessionContext.deviceId, k));
+        promises.push(deleteFault(sessionContext.deviceId, k));
       }
     }
   }
@@ -949,30 +959,6 @@ async function sendAcsRequest(
   return writeResponse(sessionContext, res);
 }
 
-function once(
-  emitter: EventEmitter,
-  event: string,
-  timeout: number
-): Promise<unknown[]> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Event ${event} timed out after ${timeout} ms`));
-    }, timeout);
-
-    emitter.once(event, (...args: unknown[]) => {
-      clearTimeout(timer);
-      resolve(args);
-    });
-  });
-}
-
-function setTimeoutPromise(delay: number, ref = true): Promise<void> {
-  return new Promise((resolve) => {
-    const timerId = setTimeout(resolve, delay);
-    if (!ref) timerId.unref();
-  });
-}
-
 // When socket closes, store active sessions in cache
 export async function onConnection(socket: Socket): Promise<void> {
   metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'open' }).inc()
@@ -1030,7 +1016,7 @@ export async function onConnection(socket: Socket): Promise<void> {
 
 export async function onClientError(err: Error, socket: Socket): Promise<void> {
   const remoteAddress = getSocketEndpoints(socket).remoteAddress;
-  const cacheSnapshot = await localCache.getCurrentSnapshot();
+  const cacheSnapshot = await localCache.getRevision();
   const debugEnabled = !!localCache.getConfig(
     cacheSnapshot,
     "cwmp.debug",
@@ -1070,9 +1056,9 @@ async function getDueTasksAndFaultsAndOperations(
   }
 
   const res2 = await Promise.all([
-    db.getDueTasks(deviceId, timestamp),
-    db.getFaults(deviceId),
-    db.getOperations(deviceId),
+    getDueTasks(deviceId, timestamp),
+    getFaults(deviceId),
+    getOperations(deviceId),
   ]);
   return {
     tasks: res2[0][0],
@@ -1443,7 +1429,7 @@ async function clientError(
     debugEnabled = sessionContext.debug;
     deviceId = sessionContext.deviceId;
   } else {
-    const cacheSnapshot = await localCache.getCurrentSnapshot();
+    const cacheSnapshot = await localCache.getRevision();
     debugEnabled = !!localCache.getConfig(
       cacheSnapshot,
       "cwmp.debug",
@@ -1705,7 +1691,6 @@ async function listenerAsync(
     return;
   }
 
-
   const modelsBlacklist: string[] = String(MODELS_BLACKLIST).split(',');
   if (modelsBlacklist.length > 0 && modelsBlacklist[0] !== '' &&
     modelsBlacklist.includes(rpc.cpeRequest.deviceId["ProductClass"])) {
@@ -1749,10 +1734,11 @@ async function listenerAsync(
       );
     }
   }
-  const deviceId = common.generateDeviceId(rpc.cpeRequest.deviceId,
+
+  const deviceId = generateDeviceId(rpc.cpeRequest.deviceId,
     altSerialValue);
 
-  const cacheSnapshot = await localCache.getCurrentSnapshot();
+  const cacheSnapshot = await localCache.getRevision();
 
   metricsExporter.sessionInit.labels({ server: 'cwmp' }).inc();
   const _sessionContext = session.init(
@@ -1798,7 +1784,7 @@ async function listenerAsync(
     }
   }
 
-  const parameters = await db.fetchDevice(
+  const parameters = await fetchDevice(
     _sessionContext.deviceId,
     _sessionContext.timestamp
   );

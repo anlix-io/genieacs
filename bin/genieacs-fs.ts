@@ -22,7 +22,7 @@ import * as logger from "../lib/logger";
 import * as cluster from "../lib/cluster";
 import * as server from "../lib/server";
 import { listener } from "../lib/fs";
-import * as db from "../lib/db";
+import * as db from "../lib/db/db";
 import * as redisClient from "../lib/redis"
 import { version as VERSION } from "../package.json";
 

@@ -17,7 +17,6 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-
 import * as logger from "./logger";
 import * as config from "./config";
 import * as redisClient from './redis'
@@ -42,7 +41,7 @@ export async function set(
   //const expire = new Date(
   //  timestamp.getTime() + CLOCK_SKEW_TOLERANCE + ttl * 1000
   //);
-  //await cacheCollection.replaceOne(
+  //await collections.cache.replaceOne(
   //  { _id: key },
   //  { value, expire, timestamp },
   //  { upsert: true }
