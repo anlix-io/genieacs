@@ -34,6 +34,7 @@ import {
 } from "./common/expression/util";
 import * as cache from "./cache";
 import * as redis from "./redis"
+import * as lock from "./lock";
 import * as localCache from "./cwmp/local-cache";
 import {
   clearTasks,
@@ -254,7 +255,7 @@ async function writeResponse(
     currentSessions.set(connection, sessionContext);
     if (now >= sessionContext.extendLock) {
       sessionContext.extendLock = now + 10000;
-      const lockToken = await cache.acquireLock(
+      const lockToken = await lock.acquireLock(
         `cwmp_session_${sessionContext.deviceId}`,
         sessionContext.timeout * 1000 + 15000,
         0,
@@ -884,7 +885,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
   await Promise.all(promises);
 
   try {
-    await cache.releaseLock(
+    await lock.releaseLock(
       `cwmp_session_${sessionContext.deviceId}`,
       sessionContext.sessionId
     );
@@ -899,7 +900,6 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
       throw e;
     }
   }
-
   if (sessionContext.new) {
     metricsExporter.registeredDevice.inc();
     logger.accessInfo({
@@ -1213,7 +1213,7 @@ async function processRequest(
     }
 
     sessionContext.extendLock = sessionContext.timestamp + 10000;
-    const lockToken = await cache.acquireLock(
+    const lockToken = await lock.acquireLock(
       `cwmp_session_${sessionContext.deviceId}`,
       sessionContext.timeout * 1000 + 15000,
       0,
