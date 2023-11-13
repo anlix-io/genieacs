@@ -61,6 +61,7 @@ import {
 } from "./types";
 import { getRequestOrigin } from "./forwarded";
 import * as logger from "./logger";
+import { encodeTag } from "./util";
 
 const VALID_PARAM_TYPES = new Set([
   "xsd:int",
@@ -217,7 +218,7 @@ export async function inform(
 
   for (const e of rpcReq.event) {
     params.push([
-      Path.parse(`Events.${e.replace(/\s+/g, "_")}`),
+      Path.parse(`Events.${encodeTag(e.replace(/\s+/g, "_"))}`),
       timestamp,
       {
         object: [timestamp, 0],
