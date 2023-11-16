@@ -46,3 +46,8 @@ export async function releaseLock(
     return;
   }
 }
+
+export async function lockExists(lockName: string): Promise<boolean> {
+  const res = await redisClient.get(lockName);
+  return res != null;
+}
