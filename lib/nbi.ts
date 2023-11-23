@@ -267,13 +267,11 @@ async function handler(
       if (channel.startsWith("task_")) {
         const objId = new ObjectId(channel.slice(5));
         await collections.tasks.deleteOne({ _id: objId });
-        await cache.del(`${deviceId}_tasks_faults_operations`);
         response.writeHead(200);
         response.end();
         return;
       }
 
-      await cache.del(`${deviceId}_tasks_faults_operations`);
       response.writeHead(200);
       response.end();
     } else {
@@ -318,7 +316,6 @@ async function handler(
           deviceId,
           30000
         );
-        await cache.del(`${deviceId}_tasks_faults_operations`);
         if (url.searchParams.has("connection_request")) {
           if (socketTimeout) request.socket.setTimeout(socketTimeout);
           response.writeHead(202, {
@@ -462,7 +459,6 @@ async function handler(
           _id: `${deviceId}:task_${taskId}`,
         });
 
-        await cache.del(`${deviceId}_tasks_faults_operations`);
         response.writeHead(200);
         response.end();
       } else {
@@ -481,7 +477,6 @@ async function handler(
           _id: `${deviceId}:task_${taskId}`,
         });
 
-        await cache.del(`${deviceId}_tasks_faults_operations`);
         response.writeHead(200);
         response.end();
       } else {

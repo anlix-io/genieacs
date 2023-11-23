@@ -382,7 +382,6 @@ export async function deleteDevice(deviceId: string): Promise<void> {
         $regex: `^${common.escapeRegExp(deviceId)}\\:`,
       },
     }),
-    cache.del(`${deviceId}_tasks_faults_operations`),
   ]);
 }
 
@@ -402,7 +401,6 @@ export async function deleteResource(
     if (channel.startsWith("task_"))
       proms.push(deleteTask(new ObjectId(channel.slice(5))));
     await Promise.all(proms);
-    await cache.del(`${deviceId}_tasks_faults_operations`);
   } else if (resource === "provisions") {
     await deleteProvision(id);
     await cache.del("cwmp-local-cache-hash");
@@ -453,8 +451,6 @@ export async function postTasks(
       tasks: statuses,
     };
   }
-
-  await cache.del(`${deviceId}_tasks_faults_operations`);
 
   const status = await connectionRequest(deviceId, device);
 
