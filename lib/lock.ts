@@ -47,7 +47,7 @@ export async function releaseLock(
   }
 }
 
-export async function lockExists(lockName: string): Promise<boolean> {
+export async function getToken(lockName: string): Promise<string> {
   const res = await redisClient.get(lockName);
-  return res != null;
+  return res;
 }

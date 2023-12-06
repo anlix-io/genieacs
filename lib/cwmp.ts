@@ -257,7 +257,7 @@ async function writeResponse(
         `cwmp_session_${sessionContext.deviceId}`,
         sessionContext.timeout * 1000 + 15000,
         0,
-        sessionContext.sessionId
+        `cwmp_session_${sessionContext.sessionId}`
       );
       if (!lockToken) throw new Error("Failed to extend lock");
     }
@@ -871,7 +871,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
   try {
     await lock.releaseLock(
       `cwmp_session_${sessionContext.deviceId}`,
-      sessionContext.sessionId
+      `cwmp_session_${sessionContext.sessionId}`
     );
   } catch (e) {
     if (sessionContext.deviceId.startsWith('C83A35-ACtion%20RG1200')) {
@@ -1141,7 +1141,7 @@ async function processRequest(
       `cwmp_session_${sessionContext.deviceId}`,
       sessionContext.timeout * 1000 + 15000,
       0,
-      sessionContext.sessionId
+      `cwmp_session_${sessionContext.sessionId}`
     );
 
     if (!lockToken) {
