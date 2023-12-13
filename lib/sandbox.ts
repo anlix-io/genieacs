@@ -35,7 +35,7 @@ const EXT = Symbol();
 
 const UNDEFINED = undefined;
 
-const context = vm.createContext();
+const context = vm.createContext(undefined, { microtaskMode: "afterEvaluate" });
 
 let state;
 
@@ -442,7 +442,7 @@ export async function run(
   let ret, status;
 
   try {
-    ret = script.runInContext(context, { displayErrors: false });
+    ret = script.runInContext(context, { displayErrors: false, timeout: 50 });
     status = 0;
   } catch (err) {
     if (err === COMMIT) {
