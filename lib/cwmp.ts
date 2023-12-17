@@ -17,9 +17,9 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import * as promClient from 'prom-client'
+import * as promClient from "prom-client";
 import * as zlib from "zlib";
-import * as url from 'url';
+import * as url from "url";
 import * as crypto from "crypto";
 import { Socket } from "net";
 import * as auth from "./auth";
@@ -33,7 +33,7 @@ import {
   extractParams,
 } from "./common/expression/util";
 import * as cache from "./cache";
-import * as redis from "./redis"
+import * as redis from "./redis";
 import * as lock from "./lock";
 import * as localCache from "./cwmp/local-cache";
 import {
@@ -73,8 +73,8 @@ import * as debug from "./debug";
 import { getRequestOrigin } from "./forwarded";
 import { getSocketEndpoints } from "./server";
 import { metricsExporter } from "./metrics";
-import { sendFlashmanInformRequest } from './flashman'
-import * as redisClient from './redis'
+import { sendFlashmanInformRequest } from "./flashman";
+import * as redisClient from "./redis";
 
 const gzipPromisified = promisify(zlib.gzip);
 const deflatePromisified = promisify(zlib.deflate);
@@ -90,10 +90,10 @@ const MODELS_BLACKLIST = config.get("MODELS_BLACKLIST");
 const currentSessions = new WeakMap<Socket, SessionContext>();
 const sessionsNonces = new WeakMap<Socket, string>();
 
-const connectionsInfo = new WeakMap<Socket, { time: number, type: number }>();
+const connectionsInfo = new WeakMap<Socket, { time: number; type: number }>();
 
 const stats = {
-  concurrentRequests: 0
+  concurrentRequests: 0,
 };
 
 let deviceIdsToCaptureXml = new Set<string>();
@@ -101,11 +101,14 @@ let capturedXmlBodies = new Map();
 
 function reevalutedeviceIdsToCaptureXml(): void {
   if (!redisClient.online()) return;
-  redisClient.getList("cwmp_device_ids_to_capture_xml").then((list) => {
-    deviceIdsToCaptureXml = new Set<string>(list);
-  }).catch(() => {
-    deviceIdsToCaptureXml = new Set<string>();
-  })
+  redisClient
+    .getList("cwmp_device_ids_to_capture_xml")
+    .then((list) => {
+      deviceIdsToCaptureXml = new Set<string>(list);
+    })
+    .catch(() => {
+      deviceIdsToCaptureXml = new Set<string>();
+    });
 }
 
 setInterval(reevalutedeviceIdsToCaptureXml, 30000).unref();
@@ -204,8 +207,9 @@ async function writeResponse(
   res,
   close = false
 ): Promise<void> {
-
-  metricsExporter.acsRequestType.labels({ type: sessionContext?.rpcRequest?.name || '<empty>' }).inc()
+  metricsExporter.acsRequestType
+    .labels({ type: sessionContext?.rpcRequest?.name || "<empty>" })
+    .inc();
 
   // Close connection after last request in session
   if (close) res.headers["Connection"] = "close";
@@ -320,7 +324,7 @@ function recordFault(
       channel: channel,
       retries: sessionContext.retries[channel],
     });
-    metricsExporter.faultRpc.inc()
+    metricsExporter.faultRpc.inc();
   }
 
   for (let i = 0; i < provisions.length; ++i) {
@@ -479,7 +483,8 @@ async function applyPresets(sessionContext: SessionContext): Promise<void> {
   const deviceEvents = {};
   for (const p of deviceData.paths.find(Path.parse("Events.*"), false, true)) {
     const attrs = deviceData.attributes.get(p);
-    if (attrs?.value && attrs.value[1][0] >= sessionContext.timestamp)
+    const t = attrs?.value[1][0] as number;
+    if (t >= sessionContext.timestamp)
       deviceEvents[p.segments[1] as string] = true;
   }
 
@@ -624,7 +629,6 @@ async function applyPresets(sessionContext: SessionContext): Promise<void> {
     rpcId: id,
     rpc: acsRequest,
   } = await session.rpcRequest(sessionContext, null);
-
 
   if (fault) {
     recordFault(sessionContext, fault);
@@ -799,12 +803,14 @@ async function nextRpc(sessionContext: SessionContext): Promise<void> {
 }
 
 async function endSession(sessionContext: SessionContext): Promise<void> {
-
-  if ((deviceIdsToCaptureXml.size > 0)) {
+  if (deviceIdsToCaptureXml.size > 0) {
     if (deviceIdsToCaptureXml.has(sessionContext?.deviceId)) {
       const xmlId = `xml_body_${sessionContext?.deviceId}`;
       // Must verify if cache.set is still ok here!
-      await cache.set(`xml_body_${sessionContext?.deviceId}`, capturedXmlBodies.get(xmlId));
+      await cache.set(
+        `xml_body_${sessionContext?.deviceId}`,
+        capturedXmlBodies.get(xmlId)
+      );
       capturedXmlBodies.delete(xmlId);
     }
   }
@@ -874,10 +880,11 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
       `cwmp_session_${sessionContext.sessionId}`
     );
   } catch (e) {
-    if (sessionContext.deviceId.startsWith('C83A35-ACtion%20RG1200')) {
+    if (sessionContext.deviceId.startsWith("C83A35-ACtion%20RG1200")) {
       logger.accessInfo({
         sessionContext: sessionContext,
-        message: 'We found you messing up once again, Action RG1200 on SoftwareVersion=2.1.2...',
+        message:
+          "We found you messing up once again, Action RG1200 on SoftwareVersion=2.1.2...",
       });
     } else {
       // Rethrow
@@ -900,7 +907,7 @@ async function sendAcsRequest(
 ): Promise<void> {
   if (!acsRequest)
     return writeResponse(sessionContext, soap.response(null), true);
-  
+
   if (acsRequest.name === "Download") {
     acsRequest.fileSize = 0;
     if (!acsRequest.url) {
@@ -945,14 +952,20 @@ async function sendAcsRequest(
 
 // When socket closes, store active sessions in cache
 export async function onConnection(socket: Socket): Promise<void> {
-  metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'open' }).inc()
+  metricsExporter.socketConnections
+    .labels({ server: "cwmp", type: "open" })
+    .inc();
   connectionsInfo.set(socket, { time: Date.now(), type: 2 });
 
   await once(socket, "close", 300000);
-  metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'close' }).inc()
+  metricsExporter.socketConnections
+    .labels({ server: "cwmp", type: "close" })
+    .inc();
   const sessionContext = currentSessions.get(socket);
   if (!sessionContext) return;
-  metricsExporter.totalConnectionTime.labels({ server: 'cwmp' }).observe(Date.now() - sessionContext.timestamp)
+  metricsExporter.totalConnectionTime
+    .labels({ server: "cwmp" })
+    .observe(Date.now() - sessionContext.timestamp);
   currentSessions.delete(socket);
   if (sessionContext.authState !== 2) {
     logger.accessError({
@@ -1017,7 +1030,6 @@ export async function onClientError(err: Error, socket: Socket): Promise<void> {
 
   if (debugEnabled) debug.clientError(remoteAddress, err);
 }
-
 
 async function reportBadState(sessionContext: SessionContext): Promise<void> {
   logger.accessError({
@@ -1117,11 +1129,12 @@ async function processRequest(
       );
     }
 
-    if ((deviceIdsToCaptureXml.size > 0)) {
+    if (deviceIdsToCaptureXml.size > 0) {
       if (deviceIdsToCaptureXml.has(sessionContext?.deviceId)) {
         const xmlId = `xml_body_${sessionContext?.deviceId}`;
-        capturedXmlBodies.set(xmlId,
-          (capturedXmlBodies.get(xmlId) || '')+JSON.stringify(body)+'\n\n\n',
+        capturedXmlBodies.set(
+          xmlId,
+          (capturedXmlBodies.get(xmlId) || "") + JSON.stringify(body) + "\n\n\n"
         );
       }
     }
@@ -1328,7 +1341,7 @@ export async function listener(
   httpResponse: ServerResponse
 ): Promise<void> {
   stats.concurrentRequests += 1;
-  metricsExporter.totalRequests.labels({ server: 'cwmp' }).inc();
+  metricsExporter.totalRequests.labels({ server: "cwmp" }).inc();
   try {
     await listenerAsync(httpRequest, httpResponse);
   } catch (err) {
@@ -1394,12 +1407,13 @@ async function listenerAsync(
   httpRequest: IncomingMessage,
   httpResponse: ServerResponse
 ): Promise<void> {
-
-  if (httpRequest.method === 'GET' && url.parse(httpRequest.url).pathname === '/metrics') {
+  if (
+    httpRequest.method === "GET" &&
+    url.parse(httpRequest.url).pathname === "/metrics"
+  ) {
     if (PROMETHEUS_METRICS)
       httpResponse.write(await promClient.register.metrics());
-    else
-      httpResponse.write('# Metrics not enabled\nup 1');
+    else httpResponse.write("# Metrics not enabled\nup 1");
     httpResponse.end();
     return;
   } else if (httpRequest.method !== "POST") {
@@ -1420,13 +1434,16 @@ async function listenerAsync(
     if (match[1] === "session") sessionId = match[2];
 
   // If overloaded, ask CPE to retry in 60 seconds
-  if (!redis.online() || (!sessionId && stats.concurrentRequests > MAX_CONCURRENT_REQUESTS)) {
+  if (
+    !redis.online() ||
+    (!sessionId && stats.concurrentRequests > MAX_CONCURRENT_REQUESTS)
+  ) {
     httpResponse.writeHead(503, {
       "Retry-after": 60,
       Connection: "close",
     });
     httpResponse.end("503 Service Unavailable");
-    metricsExporter.droppedRequests.labels({ server: 'cwmp' }).inc()
+    metricsExporter.droppedRequests.labels({ server: "cwmp" }).inc();
     return;
   }
 
@@ -1571,8 +1588,10 @@ async function listenerAsync(
     );
   }
 
-  metricsExporter.cpeRequestType.labels({ type: rpc.cpeRequest?.name || '<empty>' }).inc()
-    
+  metricsExporter.cpeRequestType
+    .labels({ type: rpc.cpeRequest?.name || "<empty>" })
+    .inc();
+
   if (isNewSession && rpc.cpeRequest?.name !== "Inform") {
     await new Promise((resolve) => setTimeout(resolve, 100));
     const sessionContextString = await cache.pop(`session_${sessionId}`);
@@ -1611,30 +1630,33 @@ async function listenerAsync(
     // from the previous session
     httpResponse.writeHead(503, { "Retry-after": 60, Connection: "close" });
     httpResponse.end("503 Service Unavailable");
-    metricsExporter.droppedRequests.labels({ server: 'cwmp' }).inc()
+    metricsExporter.droppedRequests.labels({ server: "cwmp" }).inc();
     return;
   }
 
-  const modelsBlacklist: string[] = String(MODELS_BLACKLIST).split(',');
-  if (modelsBlacklist.length > 0 && modelsBlacklist[0] !== '' &&
-    modelsBlacklist.includes(rpc.cpeRequest.deviceId["ProductClass"])) {
-    httpResponse.writeHead(403, {"Retry-after": 86400,  Connection: "close" });
+  const modelsBlacklist: string[] = String(MODELS_BLACKLIST).split(",");
+  if (
+    modelsBlacklist.length > 0 &&
+    modelsBlacklist[0] !== "" &&
+    modelsBlacklist.includes(rpc.cpeRequest.deviceId["ProductClass"])
+  ) {
+    httpResponse.writeHead(403, { "Retry-after": 86400, Connection: "close" });
     httpResponse.end("403 Forbidden");
-    metricsExporter.droppedRequests.labels({ server: 'cwmp' }).inc();
+    metricsExporter.droppedRequests.labels({ server: "cwmp" }).inc();
     return;
   }
   // Verifying SerialNumber against invalid values and using alternatives
-  let altSerialValue = '';
+  let altSerialValue = "";
   if (rpc.cpeRequest.deviceId["SerialNumber"] === "AABBCCDDEEFF") {
     const keyStr =
-    'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress';
+      "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress";
     let altSerialFound = false;
 
     for (const p of rpc.cpeRequest.parameterList) {
-      if (p[0] && p[0]['_string']) {
-        if (p[0]['_string'] === keyStr) {
+      if (p[0] && p[0]["_string"]) {
+        if (p[0]["_string"] === keyStr) {
           altSerialFound = true;
-          altSerialValue = <string> p[1];
+          altSerialValue = <string>p[1];
           break;
         }
       }
@@ -1659,12 +1681,11 @@ async function listenerAsync(
     }
   }
 
-  const deviceId = generateDeviceId(rpc.cpeRequest.deviceId,
-    altSerialValue);
+  const deviceId = generateDeviceId(rpc.cpeRequest.deviceId, altSerialValue);
 
   const cacheSnapshot = await localCache.getRevision();
 
-  metricsExporter.sessionInit.labels({ server: 'cwmp' }).inc();
+  metricsExporter.sessionInit.labels({ server: "cwmp" }).inc();
   const _sessionContext = session.init(
     deviceId,
     rpc.cwmpVersion,
@@ -1725,39 +1746,40 @@ async function listenerAsync(
       return;
     }
   }
-  
-  if ( SKIP_FLASHMAN_INFORM && parameters ) {    
-    const periodicOnly 
-      = rpc.cpeRequest != null
-      && rpc.cpeRequest.event.length===1
-      && rpc.cpeRequest.event[0]==='2 PERIODIC';
+
+  if (SKIP_FLASHMAN_INFORM && parameters) {
+    const periodicOnly =
+      rpc.cpeRequest != null &&
+      rpc.cpeRequest.event.length === 1 &&
+      rpc.cpeRequest.event[0] === "2 PERIODIC";
     if (periodicOnly) {
-      const flashmanResponse 
-      = await sendFlashmanInformRequest(rpc, parameters)
-      .catch((reason) => {
+      const flashmanResponse = await sendFlashmanInformRequest(
+        rpc,
+        parameters
+      ).catch((reason) => {
         logger.error({
           message: reason,
-        })
+        });
         return {
           success: false,
           measure: false,
-        }
+        };
       });
       if (flashmanResponse.success && !flashmanResponse.measure) {
         _sessionContext.skipProvision = true;
         logger.accessInfo({
           sessionContext: _sessionContext,
-          message:'Skipping flashman provision',
+          message: "Skipping flashman provision",
           rpc: rpc,
         });
       }
     }
   }
-  
+
   return processRequest(_sessionContext, rpc, parseWarnings, bodyStr);
 }
 
 metricsExporter.concurrentRequestsCB({
-  labels: { server: 'cwmp' },
-  cb: () => stats.concurrentRequests
-})
+  labels: { server: "cwmp" },
+  cb: () => stats.concurrentRequests,
+});

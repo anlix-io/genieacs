@@ -66,8 +66,8 @@ export async function connect(): Promise<void> {
 
   await Promise.all([
     collections.tasks.createIndex({ device: 1, timestamp: 1 }),
-  //  collections.cache.createIndex({ expire: 1 }, { expireAfterSeconds: 0 }),
-  //  collections.locks.createIndex({ expire: 1 }, { expireAfterSeconds: 0 }),
+    //  collections.cache.createIndex({ expire: 1 }, { expireAfterSeconds: 0 }),
+    //  collections.locks.createIndex({ expire: 1 }, { expireAfterSeconds: 0 }),
   ]);
 }
 

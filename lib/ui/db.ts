@@ -93,7 +93,7 @@ interface FlatAttributes {
   accessListTimestamp?: number;
 }
 
-interface FlatDevice {
+export interface FlatDevice {
   [param: string]: FlatAttributes;
 }
 

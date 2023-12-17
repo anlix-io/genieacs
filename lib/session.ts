@@ -640,14 +640,14 @@ async function runProvisions(
         }
         return null;
       }
-      if (sessionContext.skipProvision && provision[0]==='flashman') {
+      if (sessionContext.skipProvision && provision[0] === "flashman") {
         return {
           fault: null,
           clear: [],
           declare: [],
           done: true,
           returnValue: undefined,
-        }
+        };
       } else {
         return sandbox.run(
           allProvisions[provision[0]].script,
@@ -1065,7 +1065,7 @@ export async function rpcRequest(
     sessionContext.deviceData.timestamps.revision = revision;
     sessionContext.deviceData.attributes.revision = revision;
 
-    let run, provisions;
+    let run: typeof runProvisions, provisions;
     if (inception === 0) {
       run = runProvisions;
       provisions = sessionContext.provisions;
@@ -1634,7 +1634,7 @@ function generateGetRpcRequest(
       {},
       sessionContext.timestamp,
       (e) => configContextCallback(sessionContext, e)
-    );
+    ) as number;
 
     const paths = Array.from(syncState.gpn.keys()).sort(
       (a, b) => b.length - a.length
@@ -1680,11 +1680,10 @@ function generateGetRpcRequest(
         est = estimateGpnCount(patterns);
       }
 
-      if (sessionContext.deviceId.substring(11, 7) === 'ZNID') {
+      if (sessionContext.deviceId.substring(11, 7) === "ZNID") {
         // WANDevice must run nextLevel in false
         // to avoid a bug in Zhone
-        if(path.toString().includes('WANDevice'))
-          est = 64;
+        if (path.toString().includes("WANDevice")) est = 64;
       }
 
       if (est < Math.pow(2, Math.max(0, 8 - path.length))) {
@@ -1716,7 +1715,7 @@ function generateGetRpcRequest(
       {},
       sessionContext.timestamp,
       (e) => configContextCallback(sessionContext, e)
-    );
+    ) as number;
 
     const parameterNames: string[] = [];
     for (const path of syncState.refreshAttributes.value) {
@@ -1747,7 +1746,7 @@ function generateGetRpcRequest(
       {},
       sessionContext.timestamp,
       (e) => configContextCallback(sessionContext, e)
-    );
+    ) as number;
 
     const parameterNames: string[] = [];
     for (const path of syncState.refreshAttributes.notification) {
@@ -1854,7 +1853,7 @@ function generateSetRpcRequest(
     {},
     sessionContext.timestamp,
     (e) => configContextCallback(sessionContext, e)
-  );
+  ) as number;
 
   const DATETIME_MILLISECONDS = !!localCache.getConfig(
     sessionContext.cacheSnapshot,
@@ -1949,7 +1948,8 @@ function generateSetRpcRequest(
   for (const [p, t] of syncState.downloadsDownload) {
     if (!(t > 0 && t <= sessionContext.timestamp)) continue;
     const attrs = deviceData.attributes.get(p);
-    if (!(t <= attrs?.value?.[1]?.[0])) {
+    const t2 = attrs?.value?.[1]?.[0] as number;
+    if (!(t <= t2)) {
       const fileTypeAttrs = deviceData.attributes.get(
         deviceData.paths.get(p.slice(0, -1).concat(Path.parse("FileType")))
       );
@@ -1977,7 +1977,8 @@ function generateSetRpcRequest(
   if (syncState.reboot > 0 && syncState.reboot <= sessionContext.timestamp) {
     const p = sessionContext.deviceData.paths.get(Path.parse("Reboot"));
     const attrs = p ? sessionContext.deviceData.attributes.get(p) : null;
-    if (!(attrs?.value?.[1][0] >= syncState.reboot)) {
+    const t = attrs?.value?.[1][0] as number;
+    if (!(t >= syncState.reboot)) {
       delete syncState.reboot;
       return { name: "Reboot" };
     }
@@ -1990,7 +1991,8 @@ function generateSetRpcRequest(
   ) {
     const p = sessionContext.deviceData.paths.get(Path.parse("FactoryReset"));
     const attrs = p ? sessionContext.deviceData.attributes.get(p) : null;
-    if (!(attrs?.value?.[1][0] >= syncState.factoryReset)) {
+    const t = attrs?.value?.[1][0] as number;
+    if (!(t >= syncState.factoryReset)) {
       delete syncState.factoryReset;
       return { name: "FactoryReset" };
     }
@@ -3035,7 +3037,12 @@ export async function deserialize(
 
     if (r[2]) {
       deviceData.timestamps.setRevisions(path, r[2], sessionContext?.deviceId);
-      if (r[3]) deviceData.attributes.setRevisions(path, r[3], sessionContext?.deviceId);
+      if (r[3])
+        deviceData.attributes.setRevisions(
+          path,
+          r[3],
+          sessionContext?.deviceId
+        );
     }
   }
 

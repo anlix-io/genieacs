@@ -29,7 +29,7 @@ import * as cache from "./cache";
 import { version as VERSION } from "../package.json";
 import { ping } from "./ping";
 import * as logger from "./logger";
-import * as redis from "./redis"
+import * as redis from "./redis";
 import { flattenDevice } from "./ui/db";
 import { getRequestOrigin } from "./forwarded";
 import { acquireLock, releaseLock } from "./lock";

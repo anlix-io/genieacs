@@ -103,11 +103,10 @@ export async function connectionRequest(
 
   // ANLIX: Some routers have empty connectionRequestUrl
   // or not present in the tree
-  if(!connectionRequestUrl)
-    return "Empty connectionRequestUrl";
+  if (!connectionRequestUrl) return "Empty connectionRequestUrl";
 
   // ANLIX: Control if URL is valid
-  let URLdata: URL|undefined = undefined;
+  let URLdata: URL | undefined = undefined;
   try {
     URLdata = new URL(connectionRequestUrl);
   } catch (TypeError) {

@@ -2,7 +2,7 @@ name: SonarQube Scan
 
 on:
   push:
-    branches: [ master ]
+    branches: [master]
 
 jobs:
   sonarqube:
@@ -16,16 +16,15 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
+
       - name: Fetch all history for all tags and branches
         run: git fetch --unshallow
 
       - name: Running SonarQube Scan
         uses: sonarsource/sonarqube-scan-action@master
         with:
-            args: >
-              -Dsonar.verbose=true
+          args: >
+            -Dsonar.verbose=true
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-

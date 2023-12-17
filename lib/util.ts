@@ -20,7 +20,8 @@
 import { EventEmitter } from "events";
 
 export function generateDeviceId(
-  deviceIdStruct: Record<string, string>, alternativeSerial: string
+  deviceIdStruct: Record<string, string>,
+  alternativeSerial: string
 ): string {
   // Escapes everything except alphanumerics and underscore
   function esc(str): string {
@@ -33,7 +34,7 @@ export function generateDeviceId(
   }
   let serialNumber = deviceIdStruct["SerialNumber"];
 
-  if (alternativeSerial !== '') {
+  if (alternativeSerial !== "") {
     // Remove some special chars
     serialNumber = alternativeSerial.replace(/[^A-Za-z0-9_]/g, "");
   }

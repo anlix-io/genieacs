@@ -999,13 +999,16 @@ const namespacesAttrs = {
     .join(" "),
 };
 
-export function response(rpc: {
-  id: string;
-  acsRequest?: AcsRequest;
-  acsResponse?: AcsResponse;
-  acsFault?: CpeFault;
-  cwmpVersion?: string;
-}, sessionId?: string): { code: number; headers: Record<string, string>; data: string } {
+export function response(
+  rpc: {
+    id: string;
+    acsRequest?: AcsRequest;
+    acsResponse?: AcsResponse;
+    acsFault?: CpeFault;
+    cwmpVersion?: string;
+  },
+  sessionId?: string
+): { code: number; headers: Record<string, string>; data: string } {
   const headers = {
     Server: SERVER_NAME,
     SOAPServer: SERVER_NAME,

@@ -23,7 +23,7 @@ import * as cluster from "../lib/cluster";
 import * as server from "../lib/server";
 import * as cwmp from "../lib/cwmp";
 import * as db from "../lib/db/db";
-import * as redisClient from "../lib/redis"
+import * as redisClient from "../lib/redis";
 import * as extensions from "../lib/extensions";
 import { version as VERSION } from "../package.json";
 
@@ -44,7 +44,7 @@ function exitWorkerGracefully(): void {
 }
 
 function exitWorkerUngracefully(): void {
-  extensions.killAll().finally(() => {
+  void extensions.killAll().finally(() => {
     process.exit(1);
   });
 }
@@ -120,7 +120,7 @@ if (!cluster.worker) {
     });
 
   process.on("SIGINT", () => {
-    initPromise.finally(() => {
+    void initPromise.finally(() => {
       server
         .stop(false)
         .then(exitWorkerGracefully)
@@ -129,7 +129,7 @@ if (!cluster.worker) {
   });
 
   process.on("SIGTERM", () => {
-    initPromise.finally(() => {
+    void initPromise.finally(() => {
       server
         .stop(false)
         .then(exitWorkerGracefully)

@@ -33,11 +33,10 @@ const jobs = new Map();
 
 export function run(args: string[]): Promise<{ fault: Fault; value: any }> {
   const scriptName = args[0];
-  const endTimer =
-    metricsExporter.extensionDuration
-    .labels({script_name:scriptName}).startTimer()
+  const endTimer = metricsExporter.extensionDuration
+    .labels({ script_name: scriptName })
+    .startTimer();
   return new Promise((resolve) => {
-
     const id = crypto.randomBytes(8).toString("hex");
     jobs.set(id, resolve);
 

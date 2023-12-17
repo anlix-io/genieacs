@@ -305,7 +305,7 @@ function ext(...args: unknown[]): any {
 }
 
 function log(msg: string, meta: Record<string, unknown>): void {
-  if(logger.LOG_INFO_DATA) {
+  if (logger.LOG_INFO_DATA) {
     if (state.revision === state.maxRevision && state.extCounter >= 0) {
       const details = Object.assign({}, meta, {
         sessionContext: state.sessionContext,
@@ -334,33 +334,34 @@ interface alertSchema {
   acsURL: string;
   connectionRequestURL: string;
   metric: {
-    message: string,
-    reason: string,
+    message: string;
+    reason: string;
   };
 }
 
-function alert(schema: alertSchema):void {
+function alert(schema: alertSchema): void {
   if (logger.LOG_WARN_DATA) {
     if (state.revision === state.maxRevision && state.extCounter >= 0) {
       const prefixArray: string[] = [];
       for (const [key, value] of Object.entries(schema)) {
-        if (typeof value === 'string')
-          prefixArray.push(`${key}: ${value}`);
+        if (typeof value === "string") prefixArray.push(`${key}: ${value}`);
       }
-      const prefix = prefixArray.join(', ');
-      const details = Object.assign({}, {
-        sessionContext: state.sessionContext,
-        message: `[${
-          schema.metric.reason}] ${
-          prefix} -> ${
-          schema.metric.message}`,
-      });
+      const prefix = prefixArray.join(", ");
+      const details = Object.assign(
+        {},
+        {
+          sessionContext: state.sessionContext,
+          message: `[${schema.metric.reason}] ${prefix} -> ${schema.metric.message}`,
+        }
+      );
       logger.warn(details);
-      metricsExporter.provisionsFailed.labels({
-        acs_id: schema.genieID ?? 'unknown',
-        reason: schema.metric.reason ?? 'unknown',
-        model: schema.modelName ?? 'unknown',
-      }).inc();
+      metricsExporter.provisionsFailed
+        .labels({
+          acs_id: schema.genieID ?? "unknown",
+          reason: schema.metric.reason ?? "unknown",
+          model: schema.modelName ?? "unknown",
+        })
+        .inc();
     }
   }
 }
@@ -416,7 +417,7 @@ export async function run(
   startRevision: number,
   maxRevision: number,
   extCounter,
-  name?:string,
+  name?: string
 ): Promise<ScriptResult> {
   state = {
     sessionContext: sessionContext,
@@ -430,11 +431,10 @@ export async function run(
     extCounter: extCounter,
   };
 
-  const endTimer = 
-    metricsExporter.provisionDuration.
-    labels({name:name??'unknown', ext_counter:extCounter})
-    .startTimer()
-  
+  const endTimer = metricsExporter.provisionDuration
+    .labels({ name: name ?? "unknown", ext_counter: extCounter })
+    .startTimer();
+
   for (const n of Object.keys(context)) delete context[n];
 
   Object.assign(context, globals);

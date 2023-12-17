@@ -18,7 +18,7 @@
  */
 
 import * as config from "./config";
-import * as redisClient from './redis'
+import * as redisClient from "./redis";
 
 const CLOCK_SKEW_TOLERANCE = 30000;
 const MAX_CACHE_TTL = +config.get("MAX_CACHE_TTL");
@@ -45,8 +45,11 @@ export async function set(
   //  { value, expire, timestamp },
   //  { upsert: true }
   //);
-  await redisClient.setWithExpire(key, value, 
-    ttl_s + CLOCK_SKEW_TOLERANCE / 1000);
+  await redisClient.setWithExpire(
+    key,
+    value,
+    ttl_s + CLOCK_SKEW_TOLERANCE / 1000
+  );
 }
 
 export async function pop(key: string): Promise<string> {

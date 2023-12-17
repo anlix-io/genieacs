@@ -18,7 +18,7 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-const cluster =require('cluster');
+const cluster = require("cluster");
 import { Worker } from "cluster";
 import { cpus } from "os";
 import * as logger from "./logger";

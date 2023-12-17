@@ -30,26 +30,25 @@ while (!existsSync(`${ROOT_DIR}/package.json`)) {
   }
   ROOT_DIR = d;
 }
-if (!ROOT_DIR.endsWith('/dist')) 
-  ROOT_DIR = resolve(ROOT_DIR,'dist');
+if (!ROOT_DIR.endsWith("/dist")) ROOT_DIR = resolve(ROOT_DIR, "dist");
 
 // For compatibility with v1.1
 let configDir, cwmpSsl, nbiSsl, fsSsl, uiSsl, fsHostname;
 
 const options = {
   EXT_DIR: { type: "path", default: resolve(ROOT_DIR, "config/ext") },
-  
+
   MONGODB_CONNECTION_URL: {
     type: "string",
     default: "mongodb://127.0.0.1/genieacs",
   },
-  
+
   REDIS_CONNECTION_URL: {
     type: "string",
     default: "redis://127.0.0.1:6379",
   },
 
-  CWMP_FLASHMAN_URL: { type: "string", default: "http://localhost:8000"},
+  CWMP_FLASHMAN_URL: { type: "string", default: "http://localhost:8000" },
   CWMP_WORKER_PROCESSES: { type: "int", default: 0 },
   CWMP_PORT: { type: "int", default: 7547 },
   CWMP_INTERFACE: { type: "string", default: "::" },
@@ -112,7 +111,7 @@ const options = {
   LOG_STATS: { type: "bool", default: false },
   SKIP_FLASHMAN_INFORM: { type: "bool", default: false },
   BLOCK_NEW_CPE: { type: "bool", default: false },
-  MODELS_BLACKLIST: {type: "string", default: ""},
+  MODELS_BLACKLIST: { type: "string", default: "" },
 
   // Should probably never be changed
   DEVICE_ONLINE_THRESHOLD: { type: "int", default: 4000 },

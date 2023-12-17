@@ -1,6 +1,5 @@
-
 import * as logger from "./logger";
-import * as redisClient from './redis'
+import * as redisClient from "./redis";
 import * as cache from "./cache";
 
 export async function acquireLock(
@@ -10,19 +9,19 @@ export async function acquireLock(
   token = Math.random().toString(36).slice(2)
 ): Promise<string> {
   let currentToken = await redisClient.get(lockName);
-  
-  while (currentToken && currentToken!==token) {
-    if (timeout>0){
+
+  while (currentToken && currentToken !== token) {
+    if (timeout > 0) {
       const t = Date.now();
       const w = 50 + Math.random() * 50;
       await new Promise((resolve) => setTimeout(resolve, w));
       currentToken = await redisClient.get(lockName);
-      timeout -= (Date.now() - t);
+      timeout -= Date.now() - t;
     } else {
       return null;
     }
   }
-  await cache.set(lockName, token, Math.ceil(ttl_ms / 1000))
+  await cache.set(lockName, token, Math.ceil(ttl_ms / 1000));
 
   return token;
 }
@@ -35,13 +34,12 @@ export async function releaseLock(
   let deletedCount = 0;
   if (currentToken === token) {
     deletedCount = await redisClient.del(lockName);
-    if (
-      (typeof deletedCount !== "number") || (deletedCount < 1)
-    ) throw new Error(`Lock ${lockName} expired`);
+    if (typeof deletedCount !== "number" || deletedCount < 1)
+      throw new Error(`Lock ${lockName} expired`);
     else return;
   } else {
     logger.warn({
-      message:`Lock ${lockName} unexistent or not owned`
+      message: `Lock ${lockName} unexistent or not owned`,
     });
     return;
   }
