@@ -1,6 +1,6 @@
-import * as logger from "./logger";
-import * as redisClient from "./redis";
-import * as cache from "./cache";
+import * as logger from "./logger.ts";
+import * as redisClient from "./redis.ts";
+import * as cache from "./cache.ts";
 
 export async function acquireLock(
   lockName: string,
