@@ -105,15 +105,12 @@ export async function connectionRequest(
   // or not present in the tree
   if (!connectionRequestUrl) return "Empty connectionRequestUrl";
 
-  // ANLIX: Control if URL is valid
-  let URLdata: URL | undefined = undefined;
+  let remoteAddress;
   try {
-    URLdata = new URL(connectionRequestUrl);
-  } catch (TypeError) {
-    return "Invalid connectionRequestUrl";
+    remoteAddress = new URL(connectionRequestUrl).hostname;
+  } catch (err) {
+    return "Invalid connection request URL";
   }
-
-  const remoteAddress = URLdata.hostname;
 
   const evalCallback = (exp): Expression => {
     if (!Array.isArray(exp)) return exp;
