@@ -68,6 +68,10 @@ const SKIP_FLASHMAN_INFORM = config.get("SKIP_FLASHMAN_INFORM");
 const BLOCK_NEW_CPE = config.get("BLOCK_NEW_CPE");
 const MODELS_BLACKLIST = config.get("MODELS_BLACKLIST");
 
+const MAX_SESSION_DURATION = 300000;
+const LOCK_REFRESH_INTERVAL = 10000;
+export const REQUEST_TIMEOUT = 10000;
+
 const currentSessions = new WeakMap<Socket, SessionContext>();
 const sessionsNonces = new WeakMap<Socket, string>();
 
@@ -237,10 +241,10 @@ async function writeResponse(
     sessionContext.lastActivity = now;
     currentSessions.set(connection, sessionContext);
     if (now >= sessionContext.extendLock) {
-      sessionContext.extendLock = now + 10000;
+      sessionContext.extendLock = now + LOCK_REFRESH_INTERVAL;
       const lockToken = await lock.acquireLock(
         `cwmp_session_${sessionContext.deviceId}`,
-        sessionContext.timeout * 1000 + 15000,
+        sessionContext.timeout * 1000 + LOCK_REFRESH_INTERVAL + REQUEST_TIMEOUT,
         0,
         `cwmp_session_${sessionContext.sessionId}`
       );
@@ -939,10 +943,16 @@ export async function onConnection(socket: Socket): Promise<void> {
     .inc();
   connectionsInfo.set(socket, { time: Date.now(), type: 2 });
 
-  await once(socket, "close", 300000);
+  try {
+    await once(socket, "close", MAX_SESSION_DURATION);
+  } catch {
+    socket.destroy();
+  }
+  
   metricsExporter.socketConnections
-    .labels({ server: "cwmp", type: "close" })
-    .inc();
+  .labels({ server: "cwmp", type: "close" })
+  .inc();
+
   const sessionContext = currentSessions.get(socket);
   if (!sessionContext) return;
   metricsExporter.totalConnectionTime
@@ -1131,10 +1141,11 @@ async function processRequest(
       }
     }
 
-    sessionContext.extendLock = sessionContext.timestamp + 10000;
+    sessionContext.extendLock =
+      sessionContext.timestamp + LOCK_REFRESH_INTERVAL;
     const lockToken = await lock.acquireLock(
       `cwmp_session_${sessionContext.deviceId}`,
-      sessionContext.timeout * 1000 + 15000,
+      sessionContext.timeout * 1000 + LOCK_REFRESH_INTERVAL + REQUEST_TIMEOUT,
       0,
       `cwmp_session_${sessionContext.sessionId}`
     );
