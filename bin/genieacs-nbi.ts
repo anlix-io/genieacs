@@ -65,7 +65,7 @@ if (!cluster.worker) {
     port: SERVICE_PORT,
     host: SERVICE_ADDRESS,
     ssl: key && cert ? { key, cert } : null,
-    timeout: 30000,
+    timeout: 120000,
   };
 
   // Need this for Node < 15
