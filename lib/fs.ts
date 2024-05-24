@@ -17,6 +17,7 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+import * as querystring from "querystring";
 import * as url from "url";
 import { IncomingMessage, ServerResponse } from "http";
 import { pipeline, Readable } from "stream";

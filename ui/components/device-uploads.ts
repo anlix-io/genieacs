@@ -84,12 +84,12 @@ const component: ClosureComponent = (): Component => {
                   .deleteResource("uploads", filePath)
                   .then(() => {
                     notifications.push("success", "File deleted");
-                    store.fulfill(Date.now(), Date.now());
+                    store.fulfill(Date.now());
                     m.redraw();
                   })
                   .catch((err) => {
                     notifications.push("error", err.message);
-                    store.fulfill(Date.now(), Date.now());
+                    store.fulfill(Date.now());
                   });
               },
             },
@@ -117,7 +117,7 @@ const component: ClosureComponent = (): Component => {
 
       if (minTime < 60000) {
         setTimeout(() => {
-          store.fulfill(0, timestamp + 5000);
+          store.fulfill(0);
         }, 10000);
       }
 
