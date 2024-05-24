@@ -95,7 +95,9 @@ if (!cluster.worker) {
 
   const _listener = (req, res): void => {
     if (stopping) res.setHeader("Connection", "close");
-    void listener(req, res);
+    void listener(req, res).catch(
+      (err) => console.log(`Exception on FS listener: ${err}`),
+    );
   };
 
   const initDBPromise = db.connect();
