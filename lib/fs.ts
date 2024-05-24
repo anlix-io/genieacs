@@ -74,8 +74,8 @@ export async function listener(
   request: IncomingMessage,
   response: ServerResponse
 ): Promise<void> {
+  const urlParts = url.parse(request.url, true);
   if (request.method === "GET") {
-    const urlParts = url.parse(request.url, true);
     const filename = decodeURIComponent(urlParts.pathname.substring(1));
 
     const log = {
@@ -127,7 +127,7 @@ export async function listener(
       // File not found, do nothing
     }
     const uploadStream = uploadsBucket.openUploadStreamWithId(
-      fileName,
+      fileName as unknown as ObjectId,
       fileName
     );
 
