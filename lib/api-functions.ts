@@ -304,6 +304,23 @@ function sanitizeTask(task): void {
         throw new Error("Invalid 'targetFileName' property");
       break;
 
+    case "upload":
+      // genieacs-gui sends file ID instead of fileName and fileType
+      if (!task.file) {
+        if (typeof task.fileType !== "string" || !task.fileType.length)
+          throw new Error("Missing 'fileType' property");
+
+        if (typeof task.fileName !== "string" || !task.fileName.length)
+          throw new Error("Missing 'fileName' property");
+      }
+
+      if (
+        task.targetFileName != null &&
+        typeof task.targetFileName !== "string"
+      )
+        throw new Error("Invalid 'targetFileName' property");
+      break;
+
     case "provisions":
       if (
         !Array.isArray(task.provisions) ||
