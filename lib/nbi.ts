@@ -32,11 +32,14 @@ import * as logger from "./logger";
 import * as redis from "./redis"
 import { flattenDevice } from "./mongodb-functions";
 import { getSocketEndpoints } from "./server";
+import { pipeline, Readable } from "stream";
+import memoize from "./common/memoize";
 
 const DEVICE_TASKS_REGEX = /^\/devices\/([a-zA-Z0-9\-_%]+)\/tasks\/?$/;
 const TASKS_REGEX = /^\/tasks\/([a-zA-Z0-9\-_%]+)(\/[a-zA-Z_]*)?$/;
 const TAGS_REGEX =
   /^\/devices\/([a-zA-Z0-9\-_%]+)\/tags\/([a-zA-Z0-9\-_%]+)\/?$/;
+const UPLOADS_REGEX = /^\/uploads\//;
 const PRESETS_REGEX = /^\/presets\/([a-zA-Z0-9\-_%]+)\/?$/;
 const OBJECTS_REGEX = /^\/objects\/([a-zA-Z0-9\-_%]+)\/?$/;
 const FILES_REGEX = /^\/files\/([a-zA-Z0-9%!*'();:@&=+$,?#[\]\-_.~]+)\/?$/;
@@ -54,19 +57,40 @@ const collections: Record<string, Collection> = {
   presets: null as Collection,
   objects: null as Collection,
   files: null as Collection,
+  uploads: null as Collection,
   provisions: null as Collection,
   virtualParameters: null as Collection,
   faults: null as Collection,
 };
 let filesBucket: GridFSBucket;
+let uploadsBucket: GridFSBucket;
 
 onConnect(async (db) => {
   for (const k of Object.keys(collections)) {
     if (k === "files") collections[k] = db.collection("fs.files");
+    else if (k === "uploads") collections[k] = db.collection("uploads.files");
     else collections[k] = db.collection(k);
   }
   filesBucket = new GridFSBucket(db);
+  uploadsBucket = new GridFSBucket(db, { bucketName: "uploads" });
 });
+
+const getFile = memoize(
+  async (
+    uploadDate: number,
+    size: number,
+    filename: string
+  ): Promise<Iterable<Buffer>> => {
+    const chunks: Buffer[] = [];
+    const downloadStream = uploadsBucket.openDownloadStreamByName(filename);
+    for await (const chunk of downloadStream) chunks.push(chunk);
+    // Node 12-14 don't throw error when stream is closed prematurely.
+    // However, we don't need to check for that since we're checking file size.
+    if (size !== chunks.reduce((a, b) => a + b.length, 0))
+      throw new Error("File size mismatch");
+    return chunks;
+  }
+);
 
 function throwError(err: Error, httpResponse?: ServerResponse): never {
   if (httpResponse) {
@@ -883,6 +907,31 @@ export function listener(
             response.end("\n]");
           }
         );
+      });
+    } else if (UPLOADS_REGEX.test(urlParts.pathname)) {
+      const filename = decodeURIComponent(urlParts.pathname.substring(9));
+
+      collections.uploads.findOne({ _id: filename }, async (err, file) => {
+        if (err || !file) {
+          response.writeHead(404);
+          response.end();
+          return;
+        }
+
+        const fileChunks = await getFile(
+          file["uploadDate"].getTime(),
+          file.length,
+          filename
+        );
+
+        response.writeHead(200, {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": file.length,
+        });
+
+        pipeline(Readable.from(fileChunks), response, () => {
+          // Ignore errors resulting from client disconnecting
+        });
       });
     } else {
       response.writeHead(404);
