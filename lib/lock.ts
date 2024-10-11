@@ -1,34 +1,28 @@
-import { collections } from "./db/db";
 
-const CLOCK_SKEW_TOLERANCE = 30000;
+import * as logger from "./logger";
+import * as redisClient from './redis'
+import * as cache from "./cache";
 
 export async function acquireLock(
   lockName: string,
-  ttl: number,
+  ttl_ms: number,
   timeout = 0,
   token = Math.random().toString(36).slice(2)
 ): Promise<string> {
-  try {
-    const now = Date.now();
-    const r = await collections.locks.findOneAndUpdate(
-      { _id: lockName, value: token },
-      {
-        $set: {
-          expire: new Date(now + ttl + CLOCK_SKEW_TOLERANCE),
-        },
-        $currentDate: { timestamp: true },
-      },
-      { upsert: true, returnDocument: "after" }
-    );
-    if (Math.abs(r.value.timestamp.getTime() - now) > CLOCK_SKEW_TOLERANCE)
-      throw new Error("Database clock skew too great");
-  } catch (err) {
-    if (err.code !== 11000) throw err;
-    if (!(timeout > 0)) return null;
-    const w = 50 + Math.random() * 50;
-    await new Promise((resolve) => setTimeout(resolve, w));
-    return acquireLock(lockName, ttl, timeout - w, token);
+  let currentToken = await redisClient.get(lockName);
+  
+  while (currentToken && currentToken!==token) {
+    if (timeout>0){
+      const t = Date.now();
+      const w = 50 + Math.random() * 50;
+      await new Promise((resolve) => setTimeout(resolve, w));
+      currentToken = await redisClient.get(lockName);
+      timeout -= (Date.now() - t);
+    } else {
+      return null;
+    }
   }
+  await cache.set(lockName, token, Math.ceil(ttl_ms / 1000))
 
   return token;
 }
@@ -37,9 +31,18 @@ export async function releaseLock(
   lockName: string,
   token: string
 ): Promise<void> {
-  const res = await collections.locks.deleteOne({
-    _id: lockName,
-    value: token,
-  });
-  if (res.deletedCount !== 1) throw new Error("Lock expired");
+  const currentToken = await redisClient.get(lockName);
+  let deletedCount = 0;
+  if (currentToken === token) {
+    deletedCount = await redisClient.del(lockName);
+    if (
+      (typeof deletedCount !== "number") || (deletedCount < 1)
+    ) throw new Error(`Lock ${lockName} expired`);
+    else return;
+  } else {
+    logger.warn({
+      message:`Lock ${lockName} unexistent or not owned`
+    });
+    return;
+  }
 }
