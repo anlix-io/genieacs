@@ -55,6 +55,7 @@ const options = {
   CWMP_SSL_CERT: { type: "string", default: "" },
   CWMP_SSL_KEY: { type: "string", default: "" },
   CWMP_LOG_FILE: { type: "path", default: "" },
+  CWMP_NO_FAULTS_CACHE: { type: "bool", default: false },
   CWMP_ACCESS_LOG_FILE: { type: "path", default: "" },
   CWMP_PROMETHEUS_METRICS: { type: "bool", default: false },
 
