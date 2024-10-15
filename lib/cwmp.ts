@@ -806,6 +806,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
   }
 
   const promises = [];
+  const noFaultCache = config.get("CWMP_NO_FAULTS_CACHE");
 
   promises.push(
     db.saveDevice(
@@ -819,7 +820,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
   if (sessionContext.operationsTouched) {
     for (const k of Object.keys(sessionContext.operationsTouched)) {
       saveCache = true;
-      if (sessionContext.operations[k]) {
+      if (sessionContext.operations[k] && !noFaultCache) {
         promises.push(
           db.saveOperation(
             sessionContext.deviceId,
@@ -854,7 +855,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
     }
   }
 
-  if (saveCache) {
+  if (saveCache && !noFaultCache) {
     promises.push(
       cacheDueTasksAndFaultsAndOperations(
         sessionContext.deviceId,
