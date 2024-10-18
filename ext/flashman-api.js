@@ -538,8 +538,8 @@ const getChosenWanAndFields = async function(args, callback) {
   }
 
   cacheGetMultiLanProvisionIDX = callidx;
-  cacheGetMultiLanProvisionDATA = index;
-  callback(null, index);
+  cacheGetMultiLanProvisionDATA = {fields, wanChosenPath};
+  callback(null, {fields, wanChosenPath});
 };
 
 
