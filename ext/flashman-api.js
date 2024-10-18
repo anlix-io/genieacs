@@ -507,14 +507,7 @@ let cacheGetChosenWanAndFieldsIDX = '';
 let cacheGetChosenWanAndFieldsDATA = {};
 const getChosenWanAndFields = async function(args, callback) {
   const acsID = args[0];
-  const callidx = args[2];
-
-  let modelParams;
-  try {
-    modelParams = JSON.parse(args[1]);
-  } catch (error) {
-    return callback(null, {});
-  }
+  const callidx = args[1];
 
   // Avoid call to flashman twice from provision
   if (cacheGetChosenWanAndFieldsIDX === callidx) {
