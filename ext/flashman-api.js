@@ -511,9 +511,9 @@ const getChosenWanAndFields = async function(args, callback) {
 
   let modelParams;
   try {
-    modelParams = JSON.parse(args[0]);
+    modelParams = JSON.parse(args[1]);
   } catch (error) {
-    return callback(null, 0);
+    return callback(null, {});
   }
 
   // Avoid call to flashman twice from provision
