@@ -345,7 +345,6 @@ const sendFlashmanRequest = function(method, route, params, shareLoad=true) {
       json: params,
     },
     function(error, response, body) {
-      console.log('AKKIIIIII-sendFlashmanRequest:', error, response, body);
       if (error) {
         return resolve({
           success: false,
@@ -520,8 +519,6 @@ const getChosenWan = async function(args, callback) {
     `acs-id/${acsID}/wan-chosen`,
     {},
   );
-
-  console.log('AKKIIIIII-getChosenWan:', result);
 
   let wanChosenPath = '';
   if (result && result.success && result.data && result.data.wanChosenPath) {
