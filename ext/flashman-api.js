@@ -503,15 +503,15 @@ const getMultiLanProvision = async function(args, callback) {
   callback(null, index);
 };
 
-let cacheGetChosenWanAndFieldsIDX = '';
-let cacheGetChosenWanAndFieldsDATA = {};
-const getChosenWanAndFields = async function(args, callback) {
+let cacheGetChosenWanIDX = '';
+let cacheGetChosenWanDATA = {};
+const getChosenWan = async function(args, callback) {
   const acsID = args[0];
   const callidx = args[1];
 
   // Avoid call to flashman twice from provision
-  if (cacheGetChosenWanAndFieldsIDX === callidx) {
-    return callback(null, cacheGetChosenWanAndFieldsDATA);
+  if (cacheGetChosenWanIDX === callidx) {
+    return callback(null, cacheGetChosenWanDATA);
   }
 
   const result = await sendFlashmanRequest(
@@ -543,4 +543,4 @@ exports.deleteTaskCallbacks = deleteTaskCallbacks;
 exports.getDeviceFields = getDeviceFields;
 exports.syncDeviceData = syncDeviceData;
 exports.syncDeviceDiagnostics = syncDeviceDiagnostics;
-exports.getChosenWanAndFields = getChosenWanAndFields;
+exports.getChosenWan = getChosenWan;
