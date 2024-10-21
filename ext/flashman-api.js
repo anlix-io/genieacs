@@ -520,19 +520,13 @@ const getChosenWanAndFields = async function(args, callback) {
   );
 
   let wanChosenPath = '';
-  let fields;
-  if (result && result.success) {
-    if (result.wanChosenPath) {
-      wanChosenPath = result.wanChosenPath;
-    }
-    if (result.fields) {
-      fields = result.fields;
-    }
+  if (result && result.success && result.wanChosenPath) {
+    wanChosenPath = result.wanChosenPath;
   }
 
   cacheGetMultiLanProvisionIDX = callidx;
-  cacheGetMultiLanProvisionDATA = {fields, wanChosenPath};
-  callback(null, {fields, wanChosenPath});
+  cacheGetMultiLanProvisionDATA = {wanChosenPath};
+  callback(null, {wanChosenPath});
 };
 
 
