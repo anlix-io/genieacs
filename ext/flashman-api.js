@@ -519,6 +519,8 @@ const getChosenWan = async function(args, callback) {
     `acs-id/${acsID}/wan-chosen`,
   );
 
+  console.log('AKKIIIIII-getChosenWan:', result);
+
   let wanChosenPath = '';
   if (result && result.success && result.data && result.data.wanChosenPath) {
     wanChosenPath = result.data.wanChosenPath;
