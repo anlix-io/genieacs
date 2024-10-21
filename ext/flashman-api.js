@@ -345,6 +345,7 @@ const sendFlashmanRequest = function(method, route, params, shareLoad=true) {
       json: params,
     },
     function(error, response, body) {
+      console.log('AKKIIIIII-sendFlashmanRequest:', error, response, body);
       if (error) {
         return resolve({
           success: false,
