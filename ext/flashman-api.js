@@ -518,6 +518,7 @@ const getChosenWan = async function(args, callback) {
   const result = await sendFlashmanRequest(
     'GET',
     `acs-id/${acsID}/wan-chosen`,
+    {},
   );
 
   console.log('AKKIIIIII-getChosenWan:', result);
