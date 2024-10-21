@@ -520,8 +520,8 @@ const getChosenWan = async function(args, callback) {
   );
 
   let wanChosenPath = '';
-  if (result && result.success && result.wanChosenPath) {
-    wanChosenPath = result.wanChosenPath;
+  if (result && result.success && result.data && result.data.wanChosenPath) {
+    wanChosenPath = result.data.wanChosenPath;
   }
 
   cacheGetMultiLanProvisionIDX = callidx;
