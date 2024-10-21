@@ -522,8 +522,8 @@ const getChosenWanAndFields = async function(args, callback) {
   let wanChosenPath = '';
   let fields;
   if (result && result.success) {
-    if (result.wan_chosen_path) {
-      wanChosenPath = result.wan_chosen_path;
+    if (result.wanChosenPath) {
+      wanChosenPath = result.wanChosenPath;
     }
     if (result.fields) {
       fields = result.fields;
