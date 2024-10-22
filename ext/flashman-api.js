@@ -503,6 +503,33 @@ const getMultiLanProvision = async function(args, callback) {
   callback(null, index);
 };
 
+let cacheGetChosenWanIDX = '';
+let cacheGetChosenWanDATA = {};
+const getChosenWan = async function(args, callback) {
+  const acsID = args[0];
+  const callidx = args[1];
+
+  // Avoid call to flashman twice from provision
+  if (cacheGetChosenWanIDX === callidx) {
+    return callback(null, cacheGetChosenWanDATA);
+  }
+
+  const result = await sendFlashmanRequest(
+    'GET',
+    `acs-id/${acsID}/wan-chosen`,
+    {},
+  );
+
+  let wanChosenPath = '';
+  if (result && result.success && result.data && result.data.wanChosenPath) {
+    wanChosenPath = result.data.wanChosenPath;
+  }
+
+  cacheGetMultiLanProvisionIDX = callidx;
+  cacheGetMultiLanProvisionDATA = {wanChosenPath};
+  callback(null, {wanChosenPath});
+};
+
 
 /**
  * @exports controllers/external-genieacs/devices-api
@@ -517,3 +544,4 @@ exports.deleteTaskCallbacks = deleteTaskCallbacks;
 exports.getDeviceFields = getDeviceFields;
 exports.syncDeviceData = syncDeviceData;
 exports.syncDeviceDiagnostics = syncDeviceDiagnostics;
+exports.getChosenWan = getChosenWan;
