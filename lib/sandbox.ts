@@ -357,7 +357,7 @@ function alert(schema: alertSchema):void {
       });
       logger.warn(details);
       metricsExporter.provisionsFailed.labels({
-        acs_id: schema.genieID ?? 'unknown',
+        is_igd: schema.isIGDModel ?? 'unknown',
         reason: schema.metric.reason ?? 'unknown',
         model: schema.modelName ?? 'unknown',
       }).inc();
