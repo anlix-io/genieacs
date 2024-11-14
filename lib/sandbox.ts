@@ -356,8 +356,8 @@ function alert(schema: alertSchema):void {
           schema.metric.message}`,
       });
       logger.warn(details);
-      metricsExporter.provisionsFailed.labels({
-        acs_id: schema.genieID ?? 'unknown',
+      metricsExporter.failedProvisions.labels({
+        is_igd: schema.isIGDModel ?? 'unknown',
         reason: schema.metric.reason ?? 'unknown',
         model: schema.modelName ?? 'unknown',
       }).inc();
