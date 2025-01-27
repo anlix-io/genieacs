@@ -355,13 +355,11 @@ function alert(schema: alertSchema): void {
         }
       );
       logger.warn(details);
-      metricsExporter.provisionsFailed
-        .labels({
-          acs_id: schema.genieID ?? "unknown",
-          reason: schema.metric.reason ?? "unknown",
-          model: schema.modelName ?? "unknown",
-        })
-        .inc();
+      metricsExporter.failedProvisions.labels({
+        is_igd: schema.isIGDModel ?? 'unknown',
+        reason: schema.metric.reason ?? 'unknown',
+        model: schema.modelName ?? 'unknown',
+      }).inc();
     }
   }
 }

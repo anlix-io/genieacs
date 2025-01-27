@@ -1683,7 +1683,9 @@ function generateGetRpcRequest(
       if (sessionContext.deviceId.substring(11, 7) === "ZNID") {
         // WANDevice must run nextLevel in false
         // to avoid a bug in Zhone
-        if (path.toString().includes("WANDevice")) est = 64;
+        if(path.toString() === 'InternetGatewayDevice') {
+          est = 256;
+        }
       }
 
       if (est < Math.pow(2, Math.max(0, 8 - path.length))) {
