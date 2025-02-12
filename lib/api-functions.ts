@@ -53,7 +53,10 @@ export async function connectionRequest(
   let connectionRequestUrl,
     udpConnectionRequestAddress,
     stunEnable,
+    connReqXMPPConnection,
+    xmppEnable,
     connReqJabberId,
+    xmppJabberId,
     username,
     password;
 
@@ -69,8 +72,17 @@ export async function connectionRequest(
     stunEnable = ((
       device["InternetGatewayDevice.ManagementServer.STUNEnable"] || {}
     ).value || [""])[0];
+    connReqXMPPConnection = ((
+      device["InternetGatewayDevice.ManagementServer.ConnReqXMPPConnection"] || {}
+    ).value || [""])[0];
+    xmppEnable = ((
+      device[connReqXMPPConnection+".Status"] || {}
+    ).value || [""])[0];
     connReqJabberId = ((
       device["InternetGatewayDevice.ManagementServer.ConnReqJabberID"] || {}
+    ).value || [""])[0];
+    xmppJabberId = ((
+      device[connReqXMPPConnection+".JabberID"] || {}
     ).value || [""])[0];
     username = ((
       device[
@@ -91,8 +103,17 @@ export async function connectionRequest(
     ).value || [""])[0];
     stunEnable = ((device["Device.ManagementServer.STUNEnable"] || {})
       .value || [""])[0];
+    connReqXMPPConnection = ((
+      device["Device.ManagementServer.ConnReqXMPPConnection"] || {}
+    ).value || [""])[0];
+    xmppEnable = ((
+      device[connReqXMPPConnection+".Status"] || {}
+    ).value || [""])[0];
     connReqJabberId = ((device["Device.ManagementServer.ConnReqJabberID"] || {})
       .value || [""])[0];
+    xmppJabberId = ((
+      device[connReqXMPPConnection+".JabberID"] || {}
+    ).value || [""])[0];
     username = ((
       device["Device.ManagementServer.ConnectionRequestUsername"] || {}
     ).value || [""])[0];
@@ -197,14 +218,26 @@ export async function connectionRequest(
 
   let status;
 
-  if (connReqJabberId && XMPP_CONFIGURED) {
-    status = await xmppConnectionRequest(
-      connReqJabberId,
-      authExp,
-      CONNECTION_REQUEST_TIMEOUT,
-      debug,
-      deviceId,
-    );
+  if (XMPP_CONFIGURED &&
+      (connReqJabberId || (xmppEnable == "Enabled" && xmppJabberId))
+    ) {
+      if(connReqJabberId) {
+        status = await xmppConnectionRequest(
+          connReqJabberId,
+          authExp,
+          CONNECTION_REQUEST_TIMEOUT,
+          debug,
+          deviceId,
+        );
+      } else {
+        status = await xmppConnectionRequest(
+          xmppJabberId,
+          authExp,
+          CONNECTION_REQUEST_TIMEOUT,
+          debug,
+          deviceId,
+        );
+      }
   } else {
     status = await httpConnectionRequest(
       connectionRequestUrl,

@@ -286,7 +286,8 @@ function* init(
 function upgradeTls(socket: net.Socket, host: string): Promise<tls.TLSSocket> {
   return new Promise((resolve, reject) => {
     socket.on("error", reject);
-    const newSocket = tls.connect({ socket, host }, () => {
+    const newSocket = tls.connect(
+      { socket, host, rejectUnauthorized: false }, () => {
       socket.removeListener("error", reject);
       resolve(newSocket);
     });
