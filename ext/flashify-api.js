@@ -7,8 +7,8 @@ const startRedis = function() {
   const client = redis.createClient({
     url: `redis://${REDISHOST}:${REDISPORT}`,
   });
-  return new Promise((res, rej) => {
-    redis.connect().then(() => {
+  return new Promise((resolve, reject) => {
+    client.connect().then(() => {
       console.log('Successfully connected to Redis');
       resolve(client);
     }).catch((err) => {
@@ -20,7 +20,9 @@ const startRedis = function() {
 
 const publishRedisMessage = async function(topic, message) {
   let client = await startRedis();
-  await client.publish(RedisPubSubTopics[topic], message);
+  console.log('Client ok');
+  await client.publish(topic, message);
+  console.log('Publish ok');
 };
 
 let cacheReceiveDiagnosticIDX = '';
@@ -45,30 +47,32 @@ const receiveDeviceDiagnostics = async function(args, callback) {
   }
 
   if (!params || !params.acs_id) {
-    cacheSyncDeviceIDX = callidx;
-    cacheSyncDeviceDATA = {
+    cacheReceiveDiagnosticIDX = callidx;
+    cacheReceiveDiagnosticDATA = {
       success: false,
       reason: 'incomplete-params',
       message: 'Incomplete arguments',
     };
-    return callback(null, cacheSyncDeviceDATA);
+    return callback(null, cacheReceiveDiagnosticDATA);
   }
 
   try {
+    console.log('Sending to redis');
     await publishRedisMessage('diagnosticComplete', params.acs_id);
   } catch (err) {
-    cacheSyncDeviceIDX = callidx;
-    cacheSyncDeviceDATA = {
+    console.log('Error on redis: ' + err);
+    cacheReceiveDiagnosticIDX = callidx;
+    cacheReceiveDiagnosticDATA = {
       success: false,
       reason: 'redis-error',
       message: 'Error on redis',
     };
-    return callback(null, cacheSyncDeviceDATA);
+    return callback(null, cacheReceiveDiagnosticDATA);
   }
 
-  cacheSyncDeviceIDX = callidx;
-  callback(null, cacheSyncDeviceDATA);
-  cacheSyncDeviceDATA = {success: true};
+  cacheReceiveDiagnosticIDX = callidx;
+  callback(null, cacheReceiveDiagnosticDATA);
+  cacheReceiveDiagnosticDATA = {success: true};
 };
 
 exports.receiveDeviceDiagnostics = receiveDeviceDiagnostics;
