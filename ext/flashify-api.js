@@ -3,8 +3,14 @@ const redis = require('redis');
 const REDISHOST = (process.env.FLM_REDIS_HOST || '127.0.0.1');
 const REDISPORT = (process.env.FLM_REDIS_PORT || 6379);
 
+let client;
+
 const startRedis = function() {
-  const client = redis.createClient({
+  if (client) {
+    console.log('Using existing Redis connection');
+    return client;
+  }
+  client = redis.createClient({
     url: `redis://${REDISHOST}:${REDISPORT}`,
   });
   return new Promise((resolve, reject) => {
@@ -43,6 +49,7 @@ const receiveDeviceDiagnostics = async function(args, callback) {
   }
 
   if (cacheReceiveDiagnosticIDX === callidx) {
+    console.log('Using cached return');
     return callback(null, cacheReceiveDiagnosticDATA);
   }
 
