@@ -26,11 +26,18 @@ import * as db from "../lib/db";
 import * as redisClient from "../lib/redis"
 import * as extensions from "../lib/extensions";
 import { version as VERSION } from "../package.json";
+import { subscribeToInformParamsFromSpeed069 } from "../lib/speed069";
 
 logger.init("cwmp", VERSION);
 
 const SERVICE_ADDRESS = config.get("CWMP_INTERFACE") as string;
 const SERVICE_PORT = config.get("CWMP_PORT") as number;
+
+async function initRedisPubSub(): Promise<void> {
+  return redisClient.PubSubClient.connect().then(() => {
+    return subscribeToInformParamsFromSpeed069();
+  })
+};
 
 function exitWorkerGracefully(): void {
   setTimeout(exitWorkerUngracefully, 5000).unref();
@@ -102,7 +109,23 @@ if (!cluster.worker) {
   const initDBPromise = db.connect();
   const initRedisPromise = redisClient.connect();
 
-  const initPromise = Promise.all([initDBPromise, initRedisPromise])
+  const allInitPromises = [initDBPromise, initRedisPromise];
+  
+  // Only the first worker should subscribe to speed069 inform params
+  // Also, only the first container should do that
+  if (process.env.GENIEACS_DOCKER_INSTANCE === '1') {
+    if (config.get("CWMP_WORKER_PROCESSES") !== 1) {
+      logger.warn({
+        message: "Multiple CWMP worker processes detected. This is not supported in docker environment.",
+        pid: process.pid,
+      });
+    } else {
+      allInitPromises.push(initRedisPubSub())
+    }
+  }
+
+
+  const initPromise = Promise.all([initDBPromise, initRedisPromise, initRedisPubSub])
     .then(() => {
       server.start(options, cwmp.listener);
     })

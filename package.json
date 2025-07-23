@@ -83,6 +83,7 @@
     "lint-prettier": "prettier --prose-wrap always --write .",
     "lint-tsc": "tsc --noEmit",
     "lint": "npm run lint-eslint && npm run lint-prettier && npm run lint-tsc",
-    "build": "node -r esm -r ts-node/register/transpile-only build/build"
+    "build": "node -r esm -r ts-node/register/transpile-only build/build",
+    "debug-build": "tsc --project tsconfig.debug.json"
   }
 }
