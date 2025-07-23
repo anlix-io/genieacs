@@ -16,6 +16,7 @@
  */
 
 import { devicesCollection } from "./db";
+import { error, info } from "./logger";
 import { PubSubClient } from "./redis";
 
 type Speed069JsonInformParams = {
@@ -32,15 +33,21 @@ type Speed069JsonInformParams = {
   header?: string;
 }
 
-function subscribeToInformParamsFromSpeed069() : void {
+export function subscribeToInformParamsFromSpeed069() : Promise<void> {
   // Redis channel format is:
   // speed069:inform_notiff:<acs_id>
-  PubSubClient.pSubscribe("speed069:inform_notiff:*", (message, channel) => {
+  return PubSubClient.pSubscribe("speed069:inform_notiff:*", (message, channel) => {
     const acsId = channel.slice("speed069:inform_notiff:".length);
     const payload : Speed069JsonInformParams = JSON.parse(message);
     const timestamp = Date.now();
     const query = { _id: acsId }
     const update : any = {};
+
+    // This right here is the workaround for the ConnectionRequestURL that
+    // periodically gets updated.
+    payload.body.parameterList = payload.body.parameterList.filter((param) => {
+      return param.name.endsWith("ConnectionRequestURL")
+    });
 
     // We are only applying the update on "._value", "._type" and "._timestamp"
     // fields IF ALL OF THEM are present in collection as well, just for safety
@@ -62,12 +69,19 @@ function subscribeToInformParamsFromSpeed069() : void {
       { $set: update },
       { upsert: false },
     ).catch((err) => {
-      console.error("Error updating device data for speed069 inform:", err);
+      error({
+        message: "Error updating device data for speed069 inform",
+        error: err,
+      });
     });
   }).catch((err) => {
-    console.error("Error subscribing to speed069 inform channel:", err);
+    error({
+      message: "Error subscribing to speed069 inform channel",
+      error: err,
+    });
+  }).then(() => {
+    info({
+      message: "Subscribed to speed069 inform parameters channel",
+    });
   });
 }
-
-// Subscribing after 5 seconds
-setTimeout(subscribeToInformParamsFromSpeed069, 1000);
