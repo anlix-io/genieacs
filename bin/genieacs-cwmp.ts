@@ -102,8 +102,9 @@ if (!cluster.worker) {
 
   const initDBPromise = db.connect();
   const initRedisPromise = redisClient.connect();
+  const initRedisPubSubPromise = redisClient.PubSubClient.connect();
 
-  const initPromise = Promise.all([initDBPromise, initRedisPromise])
+  const initPromise = Promise.all([initDBPromise, initRedisPromise, initRedisPubSubPromise])
     .then(() => {
       server.start(options, cwmp.listener);
     })
