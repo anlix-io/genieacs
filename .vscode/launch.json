@@ -6,14 +6,21 @@
       "request": "launch",
       "program": "${workspaceFolder}/debug_dist/bin/genieacs-cwmp",
       "preLaunchTask": "npm: debug-build",
-      "outFiles": ["${workspaceFolder}/debug_dist/lib/**/*.js"],
+      "outFiles": [
+        "${workspaceFolder}/debug_dist/lib/**/*.js",
+        "${workspaceFolder}/debug_dist/bin/**/*.js"
+      ],
       "env": {
         "NODE_ENV": "development",
         "GENIEACS_MONGODB_CONNECTION_URL": "mongodb://127.0.0.1:27017/genieacs",
+        "CWMP_WORKER_PROCESSES": "1",
         "GENIEACS_CWMP_WORKER_PROCESSES": "1",
         "GENIEACS_CWMP_PORT": "57547",
         "GENIEACS_CWMP_SSL": "false",
         "GENIEACS_CWMP_PROMETHEUS_METRICS": "true",
+        
+        // simulating docker environment
+        "GENIEACS_DOCKER_INSTANCE": "2",
       },
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen"
