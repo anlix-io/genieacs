@@ -26,6 +26,7 @@ import * as db from "../lib/db";
 import * as redisClient from "../lib/redis"
 import * as extensions from "../lib/extensions";
 import { version as VERSION } from "../package.json";
+import("../lib/speed069"); // needed to load speed069 module
 
 logger.init("cwmp", VERSION);
 
