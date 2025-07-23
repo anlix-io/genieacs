@@ -1,0 +1,17 @@
+{
+  "configurations": [
+    {
+      "name": "Launch GenieACS",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/debug_dist/bin/genieacs-cwmp",
+      "preLaunchTask": "npm: debug-build",
+      "outFiles": ["${workspaceFolder}/lib/**/*.js"],
+      "env": {
+        "NODE_ENV": "development"
+      },
+      "console": "integratedTerminal",
+      "internalConsoleOptions": "neverOpen"
+    }
+  ]
+}

@@ -17,7 +17,6 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import * as config from "./config";
 import * as device from "./device";
 import * as sandbox from "./sandbox";
 import * as localCache from "./local-cache";
@@ -72,7 +71,7 @@ const VALID_PARAM_TYPES = new Set([
   "xsd:hexBinary",
 ]);
 
-function initDeviceData(): DeviceData {
+export function initDeviceData(): DeviceData {
   return {
     paths: new PathSet(),
     timestamps: new VersionedMap(),
