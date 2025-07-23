@@ -2,7 +2,14 @@
 import * as config from "./config";
 import * as redis from 'redis'
 
-const Client = redis.createClient({
+export const Client = redis.createClient({
+  url: config.get('REDIS_CONNECTION_URL') as string,
+  socket: {
+    reconnectStrategy: () => 2000
+  }
+});
+// Can't have the same client for subscribing and to execute normal operations
+export const PubSubClient = redis.createClient({
   url: config.get('REDIS_CONNECTION_URL') as string,
   socket: {
     reconnectStrategy: () => 2000

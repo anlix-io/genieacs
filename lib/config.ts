@@ -111,7 +111,6 @@ const options = {
   MAX_COMMIT_ITERATIONS: { type: "int", default: 32 },
   LOG_INFO: { type: "string", default: "info" },
   LOG_STATS: { type: "bool", default: false },
-  SKIP_FLASHMAN_INFORM: { type: "bool", default: false },
   BLOCK_NEW_CPE: { type: "bool", default: false },
   MODELS_BLACKLIST: {type: "string", default: ""},
 

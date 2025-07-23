@@ -82,12 +82,58 @@ const getDeviceFields = async function(args, callback) {
     forceUpdate: flashRes.data.forceUpdate,
     bootstrapCheckValue: flashRes.data.bootstrapCheckValue,
     permissions: flashRes.data.permissions,
+    doSyncIfNoBootstrap: flashRes.data.doSyncIfNoBootstrap,
     shouldRunRegularProvision: flashRes.data.shouldRunRegularProvision,
     shouldRunBootstrapSync: flashRes.data.shouldRunBootstrapSync,
     executeConfigFile: flashRes.data.executeConfigFile,
     configFilename: flashRes.data.configFilename,
   };
   callback(null, cacheDeviceFieldsDATA);
+};
+
+let doFlashmanSyncIDX = '';
+let doFlashmanSyncDATA = {};
+const doFlashmanSync = async function(args, callback) {
+  let params = null;
+  let callidx = 0;
+
+  // If callback not defined, define a simple one
+  if (!callback) {
+    callback = (arg1, arg2) => {
+      return arg2;
+    };
+  }
+
+  try {
+    callidx = args[1];
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    return callback(null, {
+      success: false,
+      message: 'Error parsing params JSON',
+      reason: 'params-json-parse',
+    });
+  }
+
+  // Avoid call to flashman twice from provision
+  if (doFlashmanSyncIDX === callidx) {
+    return callback(null, doFlashmanSyncDATA);
+  }
+
+  if (!params || !params.acs_id) {
+    doFlashmanSyncIDX = callidx;
+    doFlashmanSyncDATA = {
+      success: false,
+      message: 'Incomplete arguments',
+      reason: 'incomplete-params',
+    };
+    return callback(null, doFlashmanSyncDATA);
+  }
+
+  let flashRes = await sendFlashmanRequest('POST', 'device/boot-syn', params);
+  doFlashmanSyncIDX = callidx;
+  doFlashmanSyncDATA = flashRes;
+  callback(null, doFlashmanSyncDATA);
 };
 
 
@@ -542,6 +588,7 @@ exports.checkNeedConfigurationFile = checkNeedConfigurationFile;
 exports.checkNeedConfigurationFileOnWAN = checkNeedConfigurationFileOnWAN;
 exports.deleteTaskCallbacks = deleteTaskCallbacks;
 exports.getDeviceFields = getDeviceFields;
+exports.doFlashmanSync = doFlashmanSync;
 exports.syncDeviceData = syncDeviceData;
 exports.syncDeviceDiagnostics = syncDeviceDiagnostics;
 exports.getChosenWan = getChosenWan;

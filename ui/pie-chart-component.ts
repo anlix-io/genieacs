@@ -29,7 +29,7 @@ function drawChart(chartData): Children {
   const total: number = Array.from(Object.values(chartData.slices)).reduce(
     (a: number, s) => a + (s["count"]["value"] || 0),
     0
-  );
+  ) as number;
   const legend = [];
   const paths = [];
   const links = [];

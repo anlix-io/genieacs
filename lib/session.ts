@@ -17,7 +17,6 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import * as config from "./config";
 import * as device from "./device";
 import * as sandbox from "./sandbox";
 import * as localCache from "./local-cache";
@@ -72,7 +71,7 @@ const VALID_PARAM_TYPES = new Set([
   "xsd:hexBinary",
 ]);
 
-function initDeviceData(): DeviceData {
+export function initDeviceData(): DeviceData {
   return {
     paths: new PathSet(),
     timestamps: new VersionedMap(),
@@ -1682,8 +1681,9 @@ function generateGetRpcRequest(
       if (sessionContext.deviceId.substring(11, 7) === 'ZNID') {
         // WANDevice must run nextLevel in false
         // to avoid a bug in Zhone
-        if(path.toString().includes('WANDevice'))
-          est = 64;
+        if(path.toString() === 'InternetGatewayDevice') {
+          est = 256;
+        }
       }
 
       if (est < Math.pow(2, Math.max(0, 8 - path.length))) {

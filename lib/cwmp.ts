@@ -59,7 +59,6 @@ import * as debug from "./debug";
 import { getRequestOrigin } from "./forwarded";
 import { getSocketEndpoints } from "./server";
 import { metricsExporter } from "./metrics";
-import { sendFlashmanInformRequest } from './flashman'
 import * as redisClient from './redis'
 
 const gzipPromisified = promisify(zlib.gzip);
@@ -69,7 +68,6 @@ const REALM = "GenieACS";
 const MAX_CYCLES = 4;
 const MAX_CONCURRENT_REQUESTS = +config.get("MAX_CONCURRENT_REQUESTS");
 const PROMETHEUS_METRICS = config.get("CWMP_PROMETHEUS_METRICS");
-const SKIP_FLASHMAN_INFORM = config.get("SKIP_FLASHMAN_INFORM");
 const BLOCK_NEW_CPE = config.get("BLOCK_NEW_CPE");
 const MODELS_BLACKLIST = config.get("MODELS_BLACKLIST");
 
@@ -83,7 +81,7 @@ const stats = {
 };
 
 let deviceIdsToCaptureXml = new Set<string>();
-let capturedXmlBodies = new Map();
+const capturedXmlBodies = new Map();
 
 function reevalutedeviceIdsToCaptureXml(): void {
   if (!redisClient.online()) return;
@@ -1809,34 +1807,6 @@ async function listenerAsync(
       httpResponse.end("403 Forbidden");
       metricsExporter.blockedNewCpe.inc();
       return;
-    }
-  }
-  
-  if ( SKIP_FLASHMAN_INFORM && parameters ) {    
-    const periodicOnly 
-      = rpc.cpeRequest != null
-      && rpc.cpeRequest.event.length===1
-      && rpc.cpeRequest.event[0]==='2 PERIODIC';
-    if (periodicOnly) {
-      const flashmanResponse 
-      = await sendFlashmanInformRequest(rpc, parameters)
-      .catch((reason) => {
-        logger.error({
-          message: reason,
-        })
-        return {
-          success: false,
-          measure: false,
-        }
-      });
-      if (flashmanResponse.success && !flashmanResponse.measure) {
-        _sessionContext.skipProvision = true;
-        logger.accessInfo({
-          sessionContext: _sessionContext,
-          message:'Skipping flashman provision',
-          rpc: rpc,
-        });
-      }
     }
   }
   
