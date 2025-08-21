@@ -43,23 +43,7 @@ export function subscribeToInformParamsFromSpeed069() : Promise<void> {
     const query = { _id: acsId }
     const update : any = {};
 
-    // This right here is the workaround for the ConnectionRequestURL that
-    // periodically gets updated.
-    payload.body.parameterList = payload.body.parameterList.filter((param) => {
-      return param.name.endsWith("ConnectionRequestURL")
-    });
-
-    // We are only applying the update on "._value", "._type" and "._timestamp"
-    // fields IF ALL OF THEM are present in collection as well, just for safety
-    // and I'm not a genie expert to be sure which side effects could happen
-    //
-    // TO-DO: we could check them individually, but I guess it would cause
-    // extra roundtrips to the database
-
     for (const param of payload.body.parameterList) {
-      query[param.name + '._value'] = { $exists: true };
-      query[param.name + '._type'] = { $exists: true };
-      query[param.name + '._timestamp'] = { $exists: true };
       update[param.name + '._value'] = param.value;
       update[param.name + '._type'] = param.type;
       update[param.name + '._timestamp'] = new Date(timestamp);
