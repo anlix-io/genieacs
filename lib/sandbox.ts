@@ -665,7 +665,7 @@ export function addObject(
   // If the path does not end with a * or [...], return an error
   if (
     !path.endsWith("*") &&
-    !(/\[\]|\[(\w+):(\w+)(,(\w+):(\w+))*\]$/).test(path)
+    !(/(?:\[\]|\[(\w+):(\w+)(,(\w+):(\w+))*\])$/).test(path)
   ) {
     ferror(
       'addObject() called with a path that does not end with "*"' +
@@ -711,7 +711,7 @@ export function addObject(
  * Deletes the last object at the specified path.
  *
  * @param {string} path - The path where the object should be deleted.
- * @param {number?} size - The new size of the objects at the path after
+ * @param {number} [size] - The new size of the objects at the path after
  * deletion. If not provided, it will be calculated as current size minus one.
  * @return {boolean} True if the object was deleted successfully, false
  * otherwise.
@@ -741,7 +741,7 @@ export function deleteObject(
 
   if (
     typeof size === "number" &&
-    (Number.isNaN(size) || size < 0)
+    (!Number.isFinite(size) || !Number.isInteger(size) || size < 0)
   ) {
     ferror(`deleteObject() called with an invalid size: ${size}`);
     return false;
@@ -760,6 +760,15 @@ export function deleteObject(
     ferror(
       'Unable to determine the current size of objects at path:' +
        ` ${path}.`,
+    );
+    return false;
+  }
+
+  // Check if the provided size is greater than the current size, if so, return
+  // an error
+  if (typeof size === "number" && size > currentSize) {
+    ferror(
+      `deleteObject() called with a size greater than the current size: ${size}`,
     );
     return false;
   }
