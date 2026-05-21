@@ -497,7 +497,7 @@ const deleteTaskCallbacks = async function(args, callback) {
       success: false,
       message: 'Incomplete arguments',
     };
-    return callback(null, cacheSyncDeviceDATA);
+    return callback(null, cacheDeleteTaskCallbackDATA);
   }
 
   // Send an empty body because request is dumb and won't interpret result body
