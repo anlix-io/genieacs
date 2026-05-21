@@ -710,7 +710,8 @@ const getFirmwareFile = async function(args, callback) {
   // Call Flashman
   let response = await sendFlashmanRequest(
     'GET',
-    `product-class/${params.productClass}/version/${params.version}/firmware`,
+    `product-class/${encodeURIComponent(params.productClass)}/version/` +
+      `${encodeURIComponent(params.version)}/firmware`,
     {},
   );
 
