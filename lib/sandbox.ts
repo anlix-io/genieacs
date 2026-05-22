@@ -409,8 +409,9 @@ export function flog(...args: any[]): void {
   // Send the message to Flashman
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/` +
-      `${state.sessionContext.customScriptInfo?.scriptTag}/log`,
+      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
+      `${encodeURIComponent(state.sessionContext.customScriptInfo?.scriptTag)}` +
+      `/log`,
     method: 'POST',
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
@@ -466,8 +467,9 @@ export function ferror(...args: any[]): void {
   // Send the message to Flashman
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/` +
-      `${state.sessionContext.customScriptInfo?.scriptTag}/log`,
+      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
+      `${encodeURIComponent(state.sessionContext.customScriptInfo?.scriptTag)}` +
+      `/log`,
     method: 'POST',
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
@@ -502,8 +504,9 @@ function audit(actionType: ActionType, path: string, value?: any): void {
   // Send the request to Flashman for auditing
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/` +
-      `${state.sessionContext.customScriptInfo?.scriptTag}/audit`,
+      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
+      `${encodeURIComponent(state.sessionContext.customScriptInfo?.scriptTag)}` +
+      `/audit`,
     method: 'POST',
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
@@ -917,7 +920,8 @@ function sendScriptRunInfoToFlashman(
 ): void {
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/${scriptTag}/run`,
+      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
+      `${encodeURIComponent(scriptTag)}/run`,
     method: 'POST',
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,

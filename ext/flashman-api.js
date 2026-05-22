@@ -497,7 +497,7 @@ const deleteTaskCallbacks = async function(args, callback) {
       success: false,
       message: 'Incomplete arguments',
     };
-    return callback(null, cacheSyncDeviceDATA);
+    return callback(null, cacheDeleteTaskCallbackDATA);
   }
 
   // Send an empty body because request is dumb and won't interpret result body
@@ -710,7 +710,8 @@ const getFirmwareFile = async function(args, callback) {
   // Call Flashman
   let response = await sendFlashmanRequest(
     'GET',
-    `product-class/${params.productClass}/version/${params.version}/firmware`,
+    `product-class/${encodeURIComponent(params.productClass)}/version/` +
+      `${encodeURIComponent(params.version)}/firmware`,
     {},
   );
 
