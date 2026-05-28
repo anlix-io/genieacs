@@ -66,7 +66,7 @@ const FLASHMAN_PORT = process.env.FLM_WEB_PORT || 8000;
 const FLASHMAN_URL =
   'http://'+(process.env.FLM_WEB_HOST || 'localhost') + `:${FLASHMAN_PORT}`;
 
-let state;
+let state: any;
 
 const runningExtensions = new WeakMap<
   SessionContext,
