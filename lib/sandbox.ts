@@ -574,6 +574,7 @@ function audit(actionType: ActionType, path: string, value?: any): void {
  */
 function getLastRevisionValueOrCommit(
   path: string,
+  where: 'value' | 'size' = 'value',
 ): boolean | number | string | undefined {
   // Read the value directly at the highest revision available instead of
   // relying on the ParameterWrapper getter (which reads at state.revision).
@@ -593,7 +594,9 @@ function getLastRevisionValueOrCommit(
   const unpacked = device.unpack(deviceData, parsedPath, readRevision);
   if (unpacked.length) {
     const attrs = deviceData.attributes.get(unpacked[0], readRevision);
-    const valueAttr = attrs?.value?.[1];
+    let valueAttr = null;
+    if (where === 'value') valueAttr = attrs?.value?.[1];
+    if (where === 'size') valueAttr = attrs?.size;
     if (valueAttr != null) return valueAttr[0] as boolean | number | string;
   }
 
@@ -641,6 +644,11 @@ export function getValue(path: string): boolean | number | string | undefined {
   // If the path has trailing dot, remove it
   if (path.endsWith(".")) path = path.slice(0, -1);
 
+  // If we have this field in cache, return early
+  if (
+    state.sessionContext.customScriptInfo?.getValueCache?.hasOwnProperty(path)
+  ) return state.sessionContext.customScriptInfo.getValueCache[path];
+
   // Get the value
   declare(
     path,
@@ -650,6 +658,14 @@ export function getValue(path: string): boolean | number | string | undefined {
 
   // Try getting the parameter
   const parameter = getLastRevisionValueOrCommit(path);
+
+  // Save the value to next iterations
+  if (parameter !== UNDEFINED) {
+    if (!state.sessionContext.customScriptInfo?.getValueCache)
+      state.sessionContext.customScriptInfo.getValueCache = {};
+    state.sessionContext.customScriptInfo.getValueCache[path] = parameter;
+  }
+
   return parameter;
 }
 
@@ -746,13 +762,20 @@ export function addObject(
     return UNDEFINED;
   }
 
+  // If we already have a cached size for this path, use it to avoid unnecessary
+  // declares and COMMITs
+  if (
+    state.sessionContext.customScriptInfo?.addObjectCache?.hasOwnProperty(path)
+  ) return state.sessionContext.customScriptInfo.addObjectCache[path];
+
   // Get the amount of objects already present at the path
-  const parameter = declare(
+  declare(
     path,
     { path: SandboxDate.now(null, null) },
     {},
   ) as { size?: number };
-  const currentSize = parameter?.size ?? 0;
+  const parameter = getLastRevisionValueOrCommit(path, 'size');
+  const currentSize = parameter ?? 0;
 
   // If currentSize is undefined, return an error
   if (typeof currentSize !== 'number') {
@@ -765,6 +788,13 @@ export function addObject(
 
   // The new size will be current size plus 1 that we are creating
   const newSize = currentSize + 1;
+
+  // Save the value to next iterations
+  if (parameter !== UNDEFINED) {
+    if (!state.sessionContext.customScriptInfo?.addObjectCache)
+      state.sessionContext.customScriptInfo.addObjectCache = {};
+    state.sessionContext.customScriptInfo.addObjectCache[path] = newSize;
+  }
 
   // Audit this addition
   audit(ActionType.ADD_OBJECT, path, newSize);
@@ -819,13 +849,21 @@ export function deleteObject(
     return false;
   }
 
+  // If we already have a cached size for this path, use it to avoid unnecessary
+  // declares and COMMITs
+  if (state.sessionContext.customScriptInfo?.deleteObjectCache?.hasOwnProperty(
+    path,
+  )) return state.sessionContext.customScriptInfo.deleteObjectCache[path];
+
+
   // Get the amount of objects already present at the path
-  const parameter = declare(
+  declare(
     path,
     { path: SandboxDate.now(null, null) },
     {},
   ) as { size?: number };
-  const currentSize = parameter?.size ?? 1;
+  const parameter = getLastRevisionValueOrCommit(path, 'size');
+  const currentSize = parameter ?? 1;
 
   // If currentSize is undefined, return an error
   if (typeof currentSize !== 'number') {
@@ -850,6 +888,13 @@ export function deleteObject(
   const newSize = typeof size === "number" ?
     size :
     currentSize - 1;
+
+  // Save the value to next iterations
+  if (parameter !== UNDEFINED) {
+    if (!state.sessionContext.customScriptInfo?.deleteObjectCache)
+      state.sessionContext.customScriptInfo.deleteObjectCache = {};
+    state.sessionContext.customScriptInfo.deleteObjectCache[path] = newSize;
+  }
 
   // Audit this deletion
   audit(ActionType.DELETE_OBJECT, path, newSize);
@@ -1294,6 +1339,7 @@ export async function run(
       // Send the logs to flashman
       sendFlashmanLogs();
 
+      // Inform flashman that the script ran
       sendScriptRunInfoToFlashman(
         state.sessionContext.customScriptInfo.scriptTag,
       );
@@ -1327,6 +1373,7 @@ export async function run(
         // Send the logs to flashman
         sendFlashmanLogs();
 
+        // Inform flashman that the script ran
         sendScriptRunInfoToFlashman(
           state.sessionContext.customScriptInfo.scriptTag,
         );
@@ -1346,6 +1393,7 @@ export async function run(
         // Send the logs to flashman
         sendFlashmanLogs();
 
+        // Inform flashman that the script ran
         sendScriptRunInfoToFlashman(
           state.sessionContext.customScriptInfo.scriptTag,
           {fault},
