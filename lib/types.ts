@@ -183,6 +183,9 @@ export interface SessionContext {
       content: string;
       type: 'error' | 'log';
     }[];
+    getValueCache?: {[key: string]: boolean | number | string};
+    addObjectCache?: {[key: string]: number};
+    deleteObjectCache?: {[key: string]: number};
   };
 }
 
