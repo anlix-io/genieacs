@@ -553,7 +553,7 @@ function audit(actionType: ActionType, path: string, value?: any): void {
         {}
       );
     }
-  }).on('error', (err) => {
+  }).on('error', (err: unknown) => {
     // If there is an error sending the audit to Flashman, log it to the console
     log(
       'Failed to send audit to Flashman: ' + JSON.stringify(err) +
@@ -671,7 +671,7 @@ export function setValue(
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`setValue() called with a non-string path: ${path}`);
-    return UNDEFINED;
+    return false;
   }
 
   // Trim whitespace from the path
@@ -680,7 +680,7 @@ export function setValue(
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("setValue() called with an empty path.");
-    return UNDEFINED;
+    return false;
   }
 
   // If the path has trailing dot, remove it
@@ -700,7 +700,7 @@ export function setValue(
   audit(ActionType.SET_VALUE, path, value);
 
   // Set the value
-  declare(path, null, { value: value });
+  declare(path, {}, { value: value });
 
   return true;
 }
@@ -750,7 +750,7 @@ export function addObject(
   const parameter = declare(
     path,
     { path: SandboxDate.now(null, null) },
-    null,
+    {},
   ) as { size?: number };
   const currentSize = parameter?.size ?? 0;
 
@@ -823,7 +823,7 @@ export function deleteObject(
   const parameter = declare(
     path,
     { path: SandboxDate.now(null, null) },
-    null,
+    {},
   ) as { size?: number };
   const currentSize = parameter?.size ?? 1;
 
@@ -882,7 +882,7 @@ export function updateFirmware(version: string): void {
     throw new Error("updateFirmware: Sandbox not initialized");
 
   const acsId = state.sessionContext.deviceId;
-  const productClass = (declare('DeviceID.ProductClass', {value: 1}, null) as {
+  const productClass = (declare('DeviceID.ProductClass', {value: 1}, {}) as {
     value?: [boolean | number | string, string];
   })?.value?.[0];
 
@@ -1010,9 +1010,9 @@ function sendScriptRunInfoToFlashman(
         {}
       );
     }
-  }).on('error', (err) => {
+  }).on('error', (err: unknown) => {
     log(
-      `Error sending script run info to Flashman: ${err.message}`,
+      `Error sending script run info to Flashman: ${(err as Error).message}`,
       {}
     );
   });
@@ -1026,13 +1026,13 @@ function getMACAddress(): string | null {
   const genieIDDeclare = declare('DeviceID.ID', {value: 1}, {}) as {
     value?: [boolean | number | string, string];
   };
-  const ouiDeclare = declare('DeviceID.OUI', {value: 1}, null) as {
+  const ouiDeclare = declare('DeviceID.OUI', {value: 1}, {}) as {
     value?: [boolean | number | string, string];
   };
   const modelClassDeclare = declare(
     'DeviceID.ProductClass',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
@@ -1041,7 +1041,7 @@ function getMACAddress(): string | null {
   const isIGDModel = (declare(
     'InternetGatewayDevice.ManagementServer.URL',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   }).value;
@@ -1050,21 +1050,21 @@ function getMACAddress(): string | null {
   const modelNameDeclare = declare(
     prefix + '.DeviceInfo.ModelName',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
   const firmwareVersionDeclare = declare(
     prefix + '.DeviceInfo.SoftwareVersion',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
   const hardwareVersionDeclare = declare(
     prefix + '.DeviceInfo.HardwareVersion',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
@@ -1101,7 +1101,7 @@ function getMACAddress(): string | null {
   let mac: string | null = null;
   if (macFieldResponse.success && macFieldResponse.macField) {
     // Query and add the MAC address in Fargs
-    const macDeclare = declare(macFieldResponse.macField, {value: 1}, null) as {
+    const macDeclare = declare(macFieldResponse.macField, {value: 1}, {}) as {
       value?: [boolean | number | string, string];
     };
 
@@ -1130,12 +1130,12 @@ function init(): void {
   let scriptInfo;
   try {
     scriptInfo = JSON.parse(context.args[1]);
-  } catch (error) {
+  } catch (error: unknown) {
     log('Failed to parse script info from arguments, using default values. ' +
-      `Error: ${error.message}, Arguments: ${context.args[1]}`, {});
+      `Error: ${(error as Error).message}, Arguments: ${context.args[1]}`, {});
     throw new Error(
       'Failed to parse script info from arguments: ' +
-      error.message
+      (error as Error).message
     );
   }
 
@@ -1150,7 +1150,7 @@ function init(): void {
   const tagValue = declare(
     'Tags.' + scriptTag,
     { value: SandboxDate.now(null, null) },
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
@@ -1160,7 +1160,7 @@ function init(): void {
   ) throw SKIP;
 
   // Remove the script tag in Tags to avoid running again in debug mode
-  declare('Tags.' + scriptInfo?.scriptTag, null, {value: false});
+  declare('Tags.' + scriptInfo?.scriptTag, {}, {value: false});
 
   // Get the MAC address of the device
   const mac = getMACAddress();
