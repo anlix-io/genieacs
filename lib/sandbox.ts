@@ -17,6 +17,22 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/**
+ * - What are revisions?
+ * Every time that genie steps into a declare that must send it to the CPE, it
+ * throws a COMMIT symbol to make the functions in the session.ts do the RPCs
+ * and requests to the CPE. Then it starts the script again with the revision +
+ * 1. And now, when it steps into the same declare, it checks the previous
+ * revision to get the field values and doesn't send the get again to the CPE.
+ *
+ * It only throws COMMIT when it surpasses the maxRevision (the one that
+ * increases every time the script re-runs).
+ * 
+ * So, if 1 declare is not executed in the current "revision", the next declares
+ * will use old revisions to get their values and won't throw COMMIT as
+ * expected.
+ */
+
 import * as vm from "vm";
 import seedrandom from "seedrandom";
 import * as device from "./device";
