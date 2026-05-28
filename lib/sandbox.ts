@@ -417,38 +417,25 @@ export function flog(...args: any[]): void {
     !FORCE_CUSTOM_SCRIPT_LOGGING
   ) return;
 
+  if (!state.sessionContext.customScriptInfo?.lastMessageId)
+    state.sessionContext.customScriptInfo.lastMessageId = 1;
+  else state.sessionContext.customScriptInfo.lastMessageId++;
+
   // Prepare the message to log
   const message = '[ INFO  ] ' + args
     .map((arg) => typeof arg === 'object' ? JSON.stringify(arg) : arg)
     .join(" ");
-  
-  // Send the message to Flashman
-  request({
-    url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
-      `${encodeURIComponent(state.sessionContext.customScriptInfo?.scriptTag)}` +
-      `/log`,
-    method: 'POST',
-    headers: {
-      'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
-    },
-    json: {
-      timestamp: new Date().toISOString(),
-      type: 'log',
-      message: message,
-    },
-  }).on('response', (response) => {
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      log(
-        'Failed to log script to Flashman. ' +
-        `Status code: ${response.statusCode}` +
-        `Response body: ${JSON.stringify(response.body)}`,
-        {}
-      );
-    }
-  }).on('error', (err) => {
-    // If there is an error sending the log to Flashman, log it to the console
-    log('Failed to send log to Flashman: ' + JSON.stringify(err), {});
+
+  // If the message array does not exists yet, create it
+  if (!state.sessionContext.customScriptInfo?.messages)
+    state.sessionContext.customScriptInfo.messages = [];
+
+  // Push the message to the array
+  state.sessionContext.customScriptInfo.messages.push({
+    id: state.sessionContext.customScriptInfo.lastMessageId,
+    timestamp: new Date().toISOString(),
+    type: 'log',
+    message
   });
 }
 
@@ -475,11 +462,39 @@ export function ferror(...args: any[]): void {
     !FORCE_CUSTOM_SCRIPT_LOGGING
   ) return;
 
+  if (!state.sessionContext.customScriptInfo?.lastMessageId)
+    state.sessionContext.customScriptInfo.lastMessageId = 1;
+  else state.sessionContext.customScriptInfo.lastMessageId++;
+
   // Prepare the message to log
   const message = '[ ERROR ] ' + args
     .map((arg) => typeof arg === 'object' ? JSON.stringify(arg) : arg)
     .join(" ");
-  
+
+  // If the message array does not exists yet, create it
+  if (!state.sessionContext.customScriptInfo?.messages)
+    state.sessionContext.customScriptInfo.messages = [];
+
+  // Push the message to the array
+  state.sessionContext.customScriptInfo.messages.push({
+    id: state.sessionContext.customScriptInfo.lastMessageId,
+    timestamp: new Date().toISOString(),
+    type: 'error',
+    message
+  });
+}
+
+/**
+ * Send the logs to flashman all at once.
+ */
+function sendFlashmanLogs(): void {
+  // If there is no message to send or no script tag, return early
+  if (
+    !state.sessionContext.customScriptInfo?.scriptTag ||
+    !state.sessionContext?.customScriptInfo?.messages ||
+    state.sessionContext.customScriptInfo.messages.length === 0
+  ) return;
+
   // Send the message to Flashman
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
@@ -490,11 +505,7 @@ export function ferror(...args: any[]): void {
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
     },
-    json: {
-      timestamp: new Date().toISOString(),
-      type: 'error',
-      message: message,
-    },
+    json: state.sessionContext.customScriptInfo.messages,
   }).on('response', (response) => {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       log(
@@ -504,7 +515,7 @@ export function ferror(...args: any[]): void {
         {}
       );
     }
-  }).on('error', (err) => {
+  }).on('error', (err: unknown) => {
     // If there is an error sending the log to Flashman, log it to the console
     log('Failed to send error log to Flashman: ' + JSON.stringify(err), {});
   });
@@ -1239,14 +1250,25 @@ export async function run(
     // Send a request to Flashman to inform that this script already finished
     // running
     if (state.sessionContext?.customScriptInfo?.scriptTag) {
+      // Send the logs to flashman
+      sendFlashmanLogs();
+
       sendScriptRunInfoToFlashman(
         state.sessionContext.customScriptInfo.scriptTag,
       );
     }
   } catch (err) {
     if (err === COMMIT) {
+      // Clear the messages from old executions
+      if (state.sessionContext?.customScriptInfo?.messages)
+        state.sessionContext.customScriptInfo.messages = [];
+
       status = 1;
     } else if (err === EXT) {
+      // Clear the messages from old executions
+      if (state.sessionContext?.customScriptInfo?.messages)
+        state.sessionContext.customScriptInfo.messages = [];
+
       status = 2;
     } else if (err === SKIP) {
       // If we must skip this provision, just return
@@ -1261,6 +1283,9 @@ export async function run(
     } else if (err === UPGRADE) {
       // Send a request to Flashman to inform that this script run the firmware
       if (state.sessionContext?.customScriptInfo?.scriptTag) {
+        // Send the logs to flashman
+        sendFlashmanLogs();
+
         sendScriptRunInfoToFlashman(
           state.sessionContext.customScriptInfo.scriptTag,
         );
@@ -1277,6 +1302,9 @@ export async function run(
       // For any other error, convert it to a fault and return it
       const fault = errorToFault(err);
       if (state.sessionContext?.customScriptInfo?.scriptTag) {
+        // Send the logs to flashman
+        sendFlashmanLogs();
+
         sendScriptRunInfoToFlashman(
           state.sessionContext.customScriptInfo.scriptTag,
           {fault},
