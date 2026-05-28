@@ -176,6 +176,13 @@ export interface SessionContext {
     isDebug?: boolean;
     scriptTag?: string;
     mac?: string;
+    lastMessageId?: number;
+    messages?: {
+      id: number;
+      timestamp: number;
+      content: string;
+      type: 'error' | 'log';
+    }[];
   };
 }
 
