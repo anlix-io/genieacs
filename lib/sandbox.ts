@@ -564,6 +564,51 @@ function audit(actionType: ActionType, path: string, value?: any): void {
 }
 
 /**
+ * Gets the value of a parameter at the specified path directly from the device
+ * data at the last revision, bypassing the ParameterWrapper getters and their
+ * reliance on state.revision. If the value is not found, it forces a COMMIT to
+ * make genieacs fetch the parameter and re-run the script on the next
+ * iteration.
+ *
+ * @param {string} path - The path of the parameter to get.
+ */
+function getLastRevisionValueOrCommit(
+  path: string,
+): boolean | number | string | undefined {
+  // Read the value directly at the highest revision available instead of
+  // relying on the ParameterWrapper getter (which reads at state.revision).
+  //
+  // Why this matters: every script re-run resets state.revision to 0, and
+  // commit() only advances it by 1 per call. When the user calls getValue()
+  // after init() — which on subsequent runs returns early without performing
+  // the commits it normally does — state.revision stays very low (e.g. 1),
+  // while data fetched in earlier iterations lives at higher revisions
+  // (e.g. 3 or 4). VersionedMap.get(path, 1) would then return NONEXISTENT
+  // because revisions[1] was filled with NONEXISTENT when the value was
+  // first set at revision 3+. Reading at maxRevision sees the latest data
+  // regardless of how many commits the current run made.
+  const readRevision = Math.max(state.maxRevision, state.revision);
+  const parsedPath = Path.parse(path);
+  const deviceData = state.sessionContext.deviceData;
+  const unpacked = device.unpack(deviceData, parsedPath, readRevision);
+  if (unpacked.length) {
+    const attrs = deviceData.attributes.get(unpacked[0], readRevision);
+    const valueAttr = attrs?.value?.[1];
+    if (valueAttr != null) return valueAttr[0] as boolean | number | string;
+  }
+
+  // The value isn't in deviceData yet. Force genieacs to fetch the
+  // parameter and re-run the script on the next iteration by throwing
+  // COMMIT. We jump state.revision up to maxRevision so the next commit()
+  // trips the `revision === maxRevision + 1` condition and actually throws.
+  state.revision = state.maxRevision;
+  commit(); // throws COMMIT because of the state.revision we just set
+
+  // Unreachable
+  return UNDEFINED;
+}
+
+/**
  * Gets the value of a parameter at the specified path.
  *
  * @param {string} path - The path of the parameter to get.
@@ -597,18 +642,15 @@ export function getValue(path: string): boolean | number | string | undefined {
   if (path.endsWith(".")) path = path.slice(0, -1);
 
   // Get the value
-  const parameter = declare(
+  declare(
     path,
     { value: SandboxDate.now(null, null), path: SandboxDate.now(null, null) },
-    null,
-  ) as {
-    value?: [boolean | number | string, string];
-  };
+    {},
+  );
 
-  // If this is a valid parameter with a value, return it
-  if (parameter?.value?.[0]) return parameter.value[0];
-
-  return UNDEFINED;
+  // Try getting the parameter
+  const parameter = getLastRevisionValueOrCommit(path);
+  return parameter;
 }
 
 /**
