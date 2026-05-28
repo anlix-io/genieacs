@@ -981,10 +981,7 @@ function sendScriptRunInfoToFlashman(
  * function to retrieve the MAC address field from Flashman.
  */
 function getMACAddress(): string | null {
-  if (state.sessionContext?.customScriptInfo?.mac)
-    return state.sessionContext.customScriptInfo.mac;
-
-  const genieIDDeclare = declare('DeviceID.ID', {value: 1}, null) as {
+  const genieIDDeclare = declare('DeviceID.ID', {value: 1}, {}) as {
     value?: [boolean | number | string, string];
   };
   const ouiDeclare = declare('DeviceID.OUI', {value: 1}, null) as {
@@ -1088,8 +1085,6 @@ function getMACAddress(): string | null {
  * so it should not run again.
  */
 function init(): void {
-  if (state.sessionContext?.customScriptInfo?.initialized) return;
-
   let scriptInfo;
   try {
     scriptInfo = JSON.parse(context.args[1]);
@@ -1135,6 +1130,10 @@ function init(): void {
   state.sessionContext.customScriptInfo.isDebug = !!scriptInfo?.isDebug;
   state.sessionContext.customScriptInfo.scriptTag = scriptInfo?.scriptTag;
   state.sessionContext.customScriptInfo.mac = mac;
+
+  // Only ends the function here because we need to execute the previous steps
+  // in order to make genie understand the revisions
+  if (state.sessionContext?.customScriptInfo?.initialized) return;
 
   // Send the script initialization info to Flashman for monitoring
   sendScriptRunInfoToFlashman(scriptInfo.scriptTag, {started: true});
