@@ -43,6 +43,7 @@ import Path from "./common/path";
 import { Fault, SessionContext, ScriptResult } from "./types";
 import { metricsExporter } from "./metrics";
 import request from "request";
+import { IterationMapCache } from "./iteration-map";
 
 // Used for throwing to exit user script and commit
 const COMMIT = Symbol();
@@ -645,9 +646,9 @@ export function getValue(path: string): boolean | number | string | undefined {
   if (path.endsWith(".")) path = path.slice(0, -1);
 
   // If we have this field in cache, return early
-  if (
-    state.sessionContext.customScriptInfo?.getValueCache?.hasOwnProperty(path)
-  ) return state.sessionContext.customScriptInfo.getValueCache[path];
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getValue(path);
+  if (cachedValue !== undefined) return cachedValue;
 
   // Get the value
   declare(
@@ -660,11 +661,7 @@ export function getValue(path: string): boolean | number | string | undefined {
   const parameter = getLastRevisionValueOrCommit(path);
 
   // Save the value to next iterations
-  if (parameter !== UNDEFINED) {
-    if (!state.sessionContext.customScriptInfo?.getValueCache)
-      state.sessionContext.customScriptInfo.getValueCache = {};
-    state.sessionContext.customScriptInfo.getValueCache[path] = parameter;
-  }
+  if (parameter !== UNDEFINED) executionCache.saveValue(path, parameter);
 
   return parameter;
 }
@@ -712,11 +709,23 @@ export function setValue(
     return false;
   }
 
+  // Try getting the setted value
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getSettedValue(path);
+  if (cachedValue !== undefined && cachedValue === value) return cachedValue;
+
+  // Save the setted value to next iterations
+  executionCache.setValue(path, value);
+
   // Audit this setValue action before sending
   audit(ActionType.SET_VALUE, path, value);
 
   // Set the value
   declare(path, {}, { value: value });
+
+  // Force committing the changes
+  state.revision = state.maxRevision;
+  commit();
 
   return true;
 }
@@ -764,9 +773,9 @@ export function addObject(
 
   // If we already have a cached size for this path, use it to avoid unnecessary
   // declares and COMMITs
-  if (
-    state.sessionContext.customScriptInfo?.addObjectCache?.hasOwnProperty(path)
-  ) return state.sessionContext.customScriptInfo.addObjectCache[path];
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getAddObjectValue(path);
+  if (cachedValue !== undefined) return cachedValue;
 
   // Get the amount of objects already present at the path
   declare(
@@ -790,11 +799,7 @@ export function addObject(
   const newSize = currentSize + 1;
 
   // Save the value to next iterations
-  if (parameter !== UNDEFINED) {
-    if (!state.sessionContext.customScriptInfo?.addObjectCache)
-      state.sessionContext.customScriptInfo.addObjectCache = {};
-    state.sessionContext.customScriptInfo.addObjectCache[path] = newSize;
-  }
+  if (parameter !== UNDEFINED) executionCache.addObject(path, newSize);
 
   // Audit this addition
   audit(ActionType.ADD_OBJECT, path, newSize);
@@ -805,6 +810,10 @@ export function addObject(
     { path: SandboxDate.now(null, null) },
     { path: newSize },
   ) as { path?: string };
+
+  // Force committing the changes
+  state.revision = state.maxRevision;
+  commit();
 
   return newSize;
 }
@@ -851,9 +860,9 @@ export function deleteObject(
 
   // If we already have a cached size for this path, use it to avoid unnecessary
   // declares and COMMITs
-  if (state.sessionContext.customScriptInfo?.deleteObjectCache?.hasOwnProperty(
-    path,
-  )) return state.sessionContext.customScriptInfo.deleteObjectCache[path];
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getDeleteObjectValue(path);
+  if (cachedValue !== undefined) return true;
 
 
   // Get the amount of objects already present at the path
@@ -890,11 +899,7 @@ export function deleteObject(
     currentSize - 1;
 
   // Save the value to next iterations
-  if (parameter !== UNDEFINED) {
-    if (!state.sessionContext.customScriptInfo?.deleteObjectCache)
-      state.sessionContext.customScriptInfo.deleteObjectCache = {};
-    state.sessionContext.customScriptInfo.deleteObjectCache[path] = newSize;
-  }
+  if (parameter !== UNDEFINED) executionCache.deleteObject(path, newSize);
 
   // Audit this deletion
   audit(ActionType.DELETE_OBJECT, path, newSize);
@@ -905,6 +910,10 @@ export function deleteObject(
     { path: SandboxDate.now(null, null) },
     { path: newSize },
   ) as { path?: string };
+
+  // Force committing the changes
+  state.revision = state.maxRevision;
+  commit();
 
   return true;
 }
@@ -1013,6 +1022,10 @@ export function updateFirmware(version: string): void {
     {value: 1},
     {value: SandboxDate.now(null, null)},
   );
+
+  // Force committing the changes
+  state.revision = state.maxRevision;
+  commit();
 
   throw UPGRADE;
 }
@@ -1211,8 +1224,12 @@ function init(): void {
   const mac = getMACAddress();
 
   // Set the debug mode, tag and initilization flag
-  if (!state.sessionContext.customScriptInfo)
-    state.sessionContext.customScriptInfo = {};
+  if (!state.sessionContext.customScriptInfo) {
+    state.sessionContext.customScriptInfo = {
+      executionCache: new IterationMapCache<boolean | number | string>(),
+      messages: [],
+    };
+  }
 
   state.sessionContext.customScriptInfo.isDebug = !!scriptInfo?.isDebug;
   state.sessionContext.customScriptInfo.scriptTag = scriptInfo?.scriptTag;
