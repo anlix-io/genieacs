@@ -23,6 +23,7 @@ import VersionedMap from "./versioned-map";
 import InstanceSet from "./instance-set";
 import { IncomingMessage, ServerResponse } from "http";
 import { Script } from "vm";
+import { IterationMapCache } from "./iteration-map";
 
 export type Expression = string | number | boolean | null | any[];
 
@@ -177,15 +178,13 @@ export interface SessionContext {
     scriptTag?: string;
     mac?: string;
     lastMessageId?: number;
-    messages?: {
+    messages: {
       id: number;
       timestamp: number;
       content: string;
       type: 'error' | 'log';
     }[];
-    getValueCache?: {[key: string]: boolean | number | string};
-    addObjectCache?: {[key: string]: number};
-    deleteObjectCache?: {[key: string]: number};
+    executionCache: IterationMapCache;
   };
 }
 
