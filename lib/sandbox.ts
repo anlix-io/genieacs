@@ -633,7 +633,8 @@ function getLastRevisionValueOrCommit(
       readRevision,
     );
     const attrs = deviceData.attributes.get(unpackedUpper[0], readRevision);
-    const time = attrs?.object?.[0] ?? executionCache.getObjectTimestamp(path);
+    const savedTime = executionCache.getObjectTimestamp(path);
+    const time = attrs?.object?.[0] ?? savedTime;
 
     // Save the timestamp
     // This can save the infinite loop caused by always trying to commit a path
@@ -643,13 +644,7 @@ function getLastRevisionValueOrCommit(
       time ?? SandboxDate.now(null, null),
     );
 
-    console.log('attrs:', attrs);
-    console.log('time:', time);
-    console.log('SandboxDate.now():', SandboxDate.now(null, null));
-    console.log('unpackedBase:', unpackedBase);
-    console.log('unpackedBase.length:', unpackedBase.length);
-
-    if (time && time >= SandboxDate.now(null, null)) return size;
+    if (savedTime && time && time >= SandboxDate.now(null, null)) return size;
   }    
 
   // The value isn't in deviceData yet. Force genieacs to fetch the
@@ -969,11 +964,16 @@ export function deleteObject(
   audit(ActionType.DELETE_OBJECT, path, newSize);
 
   // Delete the last object
-  console.log('Declaring deleteObject with path:', path, 'and newSize:', newSize);
+  // If not wildcard, set the path size to 0
+  // Case of X.Y.Z.* -> subtract the size
+  // Case of X.Y.Z.[...] -> subtract the size
+  // Case of X.Y.Z.2 -> delete the object at index 2, so the size is 0 for it
+  const isWildcard =
+    path.endsWith("*") || (/\[\]|\[\w+:\w+(,\w+:\w+)*\]$/).test(path);
   declare(
     path,
     { path: SandboxDate.now(null, null) },
-    { path: newSize },
+    { path: isWildcard ? newSize : 0 },
   ) as { path?: string };
 
   // Force committing the changes
