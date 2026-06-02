@@ -633,9 +633,11 @@ function getLastRevisionValueOrCommit(
       readRevision,
     );
     const attrs = deviceData.attributes.get(unpackedUpper[0], readRevision);
-    const time = executionCache.getObjectTimestamp(path) ?? attrs?.object?.[0];
+    const time = attrs?.object?.[0] ?? executionCache.getObjectTimestamp(path);
 
     // Save the timestamp
+    // This can save the infinite loop caused by always trying to commit a path
+    // that doesn't exist
     executionCache.saveObjectTimestamp(
       path,
       time ?? SandboxDate.now(null, null),
