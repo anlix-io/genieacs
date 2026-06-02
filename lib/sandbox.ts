@@ -418,6 +418,8 @@ export function flog(...args: any[]): void {
     !FORCE_CUSTOM_SCRIPT_LOGGING
   ) return;
 
+  console.log(...args);
+
   if (!state.sessionContext.customScriptInfo?.lastMessageId)
     state.sessionContext.customScriptInfo.lastMessageId = 1;
   else state.sessionContext.customScriptInfo.lastMessageId++;
@@ -593,13 +595,53 @@ function getLastRevisionValueOrCommit(
   const parsedPath = Path.parse(path);
   const deviceData = state.sessionContext.deviceData;
   const unpacked = device.unpack(deviceData, parsedPath, readRevision);
-  if (unpacked.length) {
+  if (unpacked.length && where === 'value') {
     const attrs = deviceData.attributes.get(unpacked[0], readRevision);
-    let valueAttr = null;
-    if (where === 'value') valueAttr = attrs?.value?.[1];
-    if (where === 'size') valueAttr = attrs?.size;
-    if (valueAttr != null) return valueAttr[0] as boolean | number | string;
-  }
+    const valueAttr = attrs?.value?.[1];
+    const time = attrs?.value?.[0];
+
+    // Only return the value if it has a timestamp and it's as new as possible
+    if (
+      valueAttr != null && time && time >= SandboxDate.now(null, null)
+    ) return valueAttr[0] as boolean | number | string;
+  } else if (where === 'size') {
+    // Check if path has more than 1 * or [...]
+    const asteriskCount = (path.match(/\*/g) || []).length;
+    const bracketCount = (path.match(/\[.*\]/g) || []).length;
+
+    // If so, throw an error
+    if (asteriskCount > 1 || bracketCount > 1) {
+      ferror(`Path that has more than one * or [...]: ${path}`);
+      throw new Error(`Path that has more than one * or [...]: ${path}`);
+    }
+
+    // Get the size attribute from the path without the trailing * or [...]
+    const basePath = path.split('*')[0].split('[')[0];
+
+    // Remove the trailing dot if it exists
+    const normalizedBasePath = basePath.endsWith('.')
+      ? basePath.slice(0, -1)
+      : basePath;
+
+    const parsedBasePath = Path.parse(normalizedBasePath);
+    const unpackedBase = device.unpack(
+      deviceData,
+      parsedBasePath,
+      readRevision,
+    );
+
+    // Get the time we got this path
+    const attrs = deviceData.attributes.get(unpackedBase[0], readRevision);
+    const time = attrs?.object?.[0];
+
+    // console.log('attrs:', attrs);
+    // console.log('time:', time);
+    // console.log('SandboxDate.now():', SandboxDate.now(null, null));
+    // console.log('unpackedBase:', unpackedBase);
+    // console.log('unpackedBase.length:', unpackedBase.length);
+
+    if (time && time >= SandboxDate.now(null, null)) return unpackedBase.length;
+  }    
 
   // The value isn't in deviceData yet. Force genieacs to fetch the
   // parameter and re-run the script on the next iteration by throwing
@@ -712,7 +754,7 @@ export function setValue(
   // Try getting the setted value
   const executionCache = state.sessionContext.customScriptInfo.executionCache;
   const cachedValue = executionCache.getSettedValue(path);
-  if (cachedValue !== undefined && cachedValue === value) return cachedValue;
+  if (cachedValue !== undefined && cachedValue === value) return true;
 
   // Save the setted value to next iterations
   executionCache.setValue(path, value);
@@ -783,7 +825,9 @@ export function addObject(
     { path: SandboxDate.now(null, null) },
     {},
   ) as { size?: number };
-  const parameter = getLastRevisionValueOrCommit(path, 'size');
+  const parameter =
+    executionCache.getObjectSize(path) ??
+    getLastRevisionValueOrCommit(path, 'size');
   const currentSize = parameter ?? 0;
 
   // If currentSize is undefined, return an error
@@ -871,7 +915,9 @@ export function deleteObject(
     { path: SandboxDate.now(null, null) },
     {},
   ) as { size?: number };
-  const parameter = getLastRevisionValueOrCommit(path, 'size');
+  const parameter =
+    executionCache.getObjectSize(path) ??
+    getLastRevisionValueOrCommit(path, 'size');
   const currentSize = parameter ?? 1;
 
   // If currentSize is undefined, return an error
@@ -895,7 +941,7 @@ export function deleteObject(
   // The new size will be provided one or the current size minus 1 that we are
   // deleting
   const newSize = typeof size === "number" ?
-    size :
+    currentSize - size :
     currentSize - 1;
 
   // Save the value to next iterations
@@ -905,6 +951,7 @@ export function deleteObject(
   audit(ActionType.DELETE_OBJECT, path, newSize);
 
   // Delete the last object
+  console.log('Declaring deleteObject with path:', path, 'and newSize:', newSize);
   declare(
     path,
     { path: SandboxDate.now(null, null) },
@@ -1226,10 +1273,14 @@ function init(): void {
   // Set the debug mode, tag and initilization flag
   if (!state.sessionContext.customScriptInfo) {
     state.sessionContext.customScriptInfo = {
-      executionCache: new IterationMapCache<boolean | number | string>(),
+      executionCache: new IterationMapCache(),
       messages: [],
     };
   }
+
+  // Set the revision back to 0 in case this is a re-run of the script, so the
+  // script can use it to detect if it is the first run or a re-run
+  state.sessionContext.customScriptInfo.executionCache.resetRevision();
 
   state.sessionContext.customScriptInfo.isDebug = !!scriptInfo?.isDebug;
   state.sessionContext.customScriptInfo.scriptTag = scriptInfo?.scriptTag;
