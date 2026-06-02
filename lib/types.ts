@@ -127,6 +127,12 @@ export interface SyncState {
   factoryReset: number;
 }
 
+export enum ActionType {
+  ADD_OBJECT = "addObject",
+  DELETE_OBJECT = "deleteObject",
+  SET_VALUE = "setValue",
+}
+
 export interface SessionContext {
   sessionId?: string;
   timestamp: number;
@@ -183,6 +189,14 @@ export interface SessionContext {
       timestamp: number;
       content: string;
       type: 'error' | 'log';
+    }[];
+    lastAuditMessageId?: number;
+    auditMessages: {
+      id: number;
+      timestamp: number;
+      type: ActionType;
+      path: string;
+      value?: any;
     }[];
     executionCache: IterationMapCache;
   };

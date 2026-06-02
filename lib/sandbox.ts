@@ -40,7 +40,7 @@ import * as extensions from "./extensions";
 import * as logger from "./logger";
 import * as scheduling from "./scheduling";
 import Path from "./common/path";
-import { Fault, SessionContext, ScriptResult } from "./types";
+import { Fault, SessionContext, ScriptResult, ActionType } from "./types";
 import { metricsExporter } from "./metrics";
 import request from "request";
 import { IterationMapCache } from "./iteration-map";
@@ -522,13 +522,55 @@ function sendFlashmanLogs(): void {
   });
 }
 
-enum ActionType {
-  ADD_OBJECT = "addObject",
-  DELETE_OBJECT = "deleteObject",
-  SET_VALUE = "setValue",
+
+/**
+ * This function saves an audit log to send to Flashman afterwards
+ *
+ * @param actionType - The type of action that was performed (e.g. "addObject",
+ * "deleteObject", "setValue")
+ * @param path - The path of the parameter that was affected.
+ * @param value - The value that was set, if applicable.
+ * @returns void
+ */
+function audit(
+  actionType: ActionType,
+  path: string,
+  value?: any,
+): void {
+  // If not initialized, throw an error
+  if (!state.sessionContext.customScriptInfo?.initialized)
+    throw new Error("audit: Sandbox not initialized");
+
+  // Increment the message id to keep the order
+  if (!state.sessionContext.customScriptInfo?.lastAuditMessageId)
+    state.sessionContext.customScriptInfo.lastAuditMessageId = 1;
+  else state.sessionContext.customScriptInfo.lastAuditMessageId++;
+
+  // If the message array does not exists yet, create it
+  if (!state.sessionContext.customScriptInfo?.auditMessages)
+    state.sessionContext.customScriptInfo.auditMessages = [];
+
+  // Push the message to the array
+  state.sessionContext.customScriptInfo.auditMessages.push({
+    id: state.sessionContext.customScriptInfo.lastAuditMessageId,
+    timestamp: new Date().toISOString(),
+    type: actionType,
+    path,
+    value
+  });
 }
 
-function audit(actionType: ActionType, path: string, value?: any): void {
+/**
+ * This function sends all the audit logs to Flashman
+ */
+function sendAuditLogs(): void {
+  // If there is no message to send or no script tag, return early
+  if (
+    !state.sessionContext.customScriptInfo?.scriptTag ||
+    !state.sessionContext?.customScriptInfo?.auditMessages ||
+    state.sessionContext.customScriptInfo.auditMessages.length === 0
+  ) return;
+
   // Send the request to Flashman for auditing
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
@@ -539,12 +581,7 @@ function audit(actionType: ActionType, path: string, value?: any): void {
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
     },
-    json: {
-      timestamp: new Date().toISOString(),
-      type: actionType,
-      path: path,
-      value: value,
-    },
+    json: state.sessionContext.customScriptInfo.auditMessages,
   }).on('response', (response) => {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       log(
@@ -673,8 +710,7 @@ export function getValue(path: string): boolean | number | string | undefined {
 
   // If the path is not a string, return an error
   if (typeof path !== "string") {
-    ferror(`getValue() called with a non-string path: ${path}`);
-    return UNDEFINED;
+    ferror(`getValue() called with a non-string path: ${path}`);    throw new Error("getValue() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -683,11 +719,26 @@ export function getValue(path: string): boolean | number | string | undefined {
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("getValue() called with an empty path.");
-    return UNDEFINED;
+    throw new Error("getValue() called with an empty path");
   }
 
   // If the path has trailing dot, remove it
   if (path.endsWith(".")) path = path.slice(0, -1);
+
+  // If the path contains a * or [...], return an error
+  if (
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
+  ) {
+    ferror(
+      'getValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+    throw new Error(
+      'getValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+  }
 
   // If we have this field in cache, return early
   const executionCache = state.sessionContext.customScriptInfo.executionCache;
@@ -728,7 +779,7 @@ export function setValue(
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`setValue() called with a non-string path: ${path}`);
-    return false;
+    throw new Error("setValue() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -737,11 +788,26 @@ export function setValue(
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("setValue() called with an empty path.");
-    return false;
+    throw new Error("setValue() called with an empty path");
   }
 
   // If the path has trailing dot, remove it
   if (path.endsWith(".")) path = path.slice(0, -1);
+
+  // If the path contains a * or [...], return an error
+  if (
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
+  ) {
+    ferror(
+      'setValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+    throw new Error(
+      'setValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+  }
 
   // Check if the value is of valid type
   if (
@@ -750,7 +816,9 @@ export function setValue(
     typeof value !== "string"
   ) {
     ferror(`setValue() called with an invalid value type: ${typeof value}.`);
-    return false;
+    throw new Error(
+      `setValue() called with an invalid value type: ${typeof value}.`,
+    );
   }
 
   // Try getting the setted value
@@ -791,7 +859,7 @@ export function addObject(
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`addObject() called with a non-string path: ${path}`);
-    return UNDEFINED;
+    throw new Error("addObject() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -800,20 +868,29 @@ export function addObject(
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("addObject() called with an empty path.");
-    return UNDEFINED;
+    throw new Error("addObject() called with an empty path");
   }
 
-  // If the path does not end with a * or [...], return an error
+  // If the path ends with a dot, remove it
+  if (path.endsWith(".")) path = path.slice(0, -1);
+
+  // If the path has a * or [...], return an error
   if (
-    !path.endsWith("*") &&
-    !(/(?:\[\]|\[(\w+):(\w+)(,(\w+):(\w+))*\])$/).test(path)
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
   ) {
     ferror(
-      'addObject() called with a path that does not end with "*"' +
-        `or [...]: ${path}.`,
+      'addObject() called with a path that contains invalid characters: ' +
+      path + '.'
     );
-    return UNDEFINED;
+    throw new Error(
+      'addObject() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
   }
+
+  // Make the path end in .*
+  path = path + ".*";
 
   // If we already have a cached size for this path, use it to avoid unnecessary
   // declares and COMMITs
@@ -838,7 +915,9 @@ export function addObject(
       'Unable to determine the current size of objects at path:' +
        ` ${path}.`,
     );
-    return UNDEFINED;
+    throw new Error(
+      `Unable to determine the current size of objects at path: ${path}`,
+    );
   }
 
   // The new size will be current size plus 1 that we are creating
@@ -868,14 +947,11 @@ export function addObject(
  * Deletes the last object at the specified path.
  *
  * @param {string} path - The path where the object should be deleted.
- * @param {number} [size] - The new size of the objects at the path after
- * deletion. If not provided, it will be calculated as current size minus one.
  * @return {boolean} True if the object was deleted successfully, false
  * otherwise.
  */
 export function deleteObject(
   path: string,
-  size?: number,
 ): boolean {
   // If not initialized, throw an error
   if (!state.sessionContext.customScriptInfo?.initialized)
@@ -884,7 +960,7 @@ export function deleteObject(
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`deleteObject() called with a non-string path: ${path}`);
-    return false;
+    throw new Error("deleteObject() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -893,15 +969,25 @@ export function deleteObject(
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("deleteObject() called with an empty path.");
-    return false;
+    throw new Error("deleteObject() called with an empty path");
   }
 
+  // If the path ends with a dot, remove it
+  if (path.endsWith(".")) path = path.slice(0, -1);
+
+  // If the path has a * or [...], return an error
   if (
-    typeof size === "number" &&
-    (!Number.isFinite(size) || !Number.isInteger(size) || size < 0)
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
   ) {
-    ferror(`deleteObject() called with an invalid size: ${size}`);
-    return false;
+    ferror(
+      'deleteObject() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+    throw new Error(
+      'deleteObject() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
   }
 
   // If we already have a cached size for this path, use it to avoid unnecessary
@@ -928,23 +1014,13 @@ export function deleteObject(
       'Unable to determine the current size of objects at path:' +
        ` ${path}.`,
     );
-    return false;
-  }
-
-  // Check if the provided size is greater than the current size, if so, return
-  // an error
-  if (typeof size === "number" && size > currentSize) {
-    ferror(
-      `deleteObject() called with a size greater than the current size: ${size}`,
+    throw new Error(
+      `Unable to determine the current size of objects at path: ${path}`,
     );
-    return false;
   }
 
-  // The new size will be provided one or the current size minus 1 that we are
-  // deleting
-  const newSize = typeof size === "number" ?
-    currentSize - size :
-    currentSize - 1;
+  // The new size will be current size minus 1 that we are deleting
+  const newSize = currentSize - 1;
 
   // If the size is < 0, return
   if (newSize < 0) {
@@ -1291,6 +1367,7 @@ function init(): void {
     state.sessionContext.customScriptInfo = {
       executionCache: new IterationMapCache(),
       messages: [],
+      auditMessages: [],
     };
   }
 
@@ -1420,6 +1497,9 @@ export async function run(
     // Send a request to Flashman to inform that this script already finished
     // running
     if (state.sessionContext?.customScriptInfo?.scriptTag) {
+      // Send the audit logs to flashman
+      sendAuditLogs();
+
       // Send the logs to flashman
       sendFlashmanLogs();
 
@@ -1454,6 +1534,9 @@ export async function run(
     } else if (err === UPGRADE) {
       // Send a request to Flashman to inform that this script run the firmware
       if (state.sessionContext?.customScriptInfo?.scriptTag) {
+        // Send the audit logs to flashman
+        sendAuditLogs();
+
         // Send the logs to flashman
         sendFlashmanLogs();
 
@@ -1474,6 +1557,9 @@ export async function run(
       // For any other error, convert it to a fault and return it
       const fault = errorToFault(err);
       if (state.sessionContext?.customScriptInfo?.scriptTag) {
+        // Send the audit logs to flashman
+        sendAuditLogs();
+
         // Send the logs to flashman
         sendFlashmanLogs();
 
