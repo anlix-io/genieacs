@@ -591,6 +591,7 @@ function getLastRevisionValueOrCommit(
   // because revisions[1] was filled with NONEXISTENT when the value was
   // first set at revision 3+. Reading at maxRevision sees the latest data
   // regardless of how many commits the current run made.
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
   const readRevision = Math.max(state.maxRevision, state.revision);
   const parsedPath = Path.parse(path);
   const deviceData = state.sessionContext.deviceData;
@@ -598,49 +599,55 @@ function getLastRevisionValueOrCommit(
   if (unpacked.length && where === 'value') {
     const attrs = deviceData.attributes.get(unpacked[0], readRevision);
     const valueAttr = attrs?.value?.[1];
-    const time = attrs?.value?.[0];
+    const time = attrs?.value?.[0] ?? executionCache.getObjectTimestamp(path);
+
+    // Save the timestamp
+    executionCache.saveObjectTimestamp(
+      path,
+      time ?? SandboxDate.now(null, null),
+    );
 
     // Only return the value if it has a timestamp and it's as new as possible
     if (
       valueAttr != null && time && time >= SandboxDate.now(null, null)
     ) return valueAttr[0] as boolean | number | string;
   } else if (where === 'size') {
-    // Check if path has more than 1 * or [...]
-    const asteriskCount = (path.match(/\*/g) || []).length;
-    const bracketCount = (path.match(/\[.*\]/g) || []).length;
-
-    // If so, throw an error
-    if (asteriskCount > 1 || bracketCount > 1) {
-      ferror(`Path that has more than one * or [...]: ${path}`);
-      throw new Error(`Path that has more than one * or [...]: ${path}`);
-    }
-
-    // Get the size attribute from the path without the trailing * or [...]
-    const basePath = path.split('*')[0].split('[')[0];
-
-    // Remove the trailing dot if it exists
-    const normalizedBasePath = basePath.endsWith('.')
-      ? basePath.slice(0, -1)
-      : basePath;
-
-    const parsedBasePath = Path.parse(normalizedBasePath);
+    // Get the size
+    const parsedBasePath = Path.parse(path);
     const unpackedBase = device.unpack(
       deviceData,
       parsedBasePath,
       readRevision,
     );
+    const size = unpackedBase.length;
 
-    // Get the time we got this path
-    const attrs = deviceData.attributes.get(unpackedBase[0], readRevision);
-    const time = attrs?.object?.[0];
+    // Get the time we got this path, remove the * or [...] as they might not
+    // exist and thus return an empty path
+    const upperPath = path
+      .replace(/\.[*[].*$/, '')
+      .replace(/\.$/, '');
+    const parsedUpperPath = Path.parse(upperPath);
+    const unpackedUpper = device.unpack(
+      deviceData,
+      parsedUpperPath,
+      readRevision,
+    );
+    const attrs = deviceData.attributes.get(unpackedUpper[0], readRevision);
+    const time = executionCache.getObjectTimestamp(path) ?? attrs?.object?.[0];
 
-    // console.log('attrs:', attrs);
-    // console.log('time:', time);
-    // console.log('SandboxDate.now():', SandboxDate.now(null, null));
-    // console.log('unpackedBase:', unpackedBase);
-    // console.log('unpackedBase.length:', unpackedBase.length);
+    // Save the timestamp
+    executionCache.saveObjectTimestamp(
+      path,
+      time ?? SandboxDate.now(null, null),
+    );
 
-    if (time && time >= SandboxDate.now(null, null)) return unpackedBase.length;
+    console.log('attrs:', attrs);
+    console.log('time:', time);
+    console.log('SandboxDate.now():', SandboxDate.now(null, null));
+    console.log('unpackedBase:', unpackedBase);
+    console.log('unpackedBase.length:', unpackedBase.length);
+
+    if (time && time >= SandboxDate.now(null, null)) return size;
   }    
 
   // The value isn't in deviceData yet. Force genieacs to fetch the
@@ -943,6 +950,15 @@ export function deleteObject(
   const newSize = typeof size === "number" ?
     currentSize - size :
     currentSize - 1;
+
+  // If the size is < 0, return
+  if (newSize < 0) {
+    ferror(
+      `deleteObject() called resulting in a negative size: ${newSize}.` +
+        ` Current size was: ${currentSize}`,
+    );
+    return false;
+  }
 
   // Save the value to next iterations
   if (parameter !== UNDEFINED) executionCache.deleteObject(path, newSize);
