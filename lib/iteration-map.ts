@@ -20,6 +20,7 @@ export class IterationMapCache {
   private declare valueCache: CachedValues[];
 
   private readonly SIZE_OBJECT_SUFFIX = '__size';
+  private readonly TIMESTAMP_OBJECT_SUFFIX = '__timestamp';
 
   public constructor() {
     this.currentRevision = 0;
@@ -167,6 +168,36 @@ export class IterationMapCache {
    */
   public resetRevision(): void {
     this.currentRevision = 0;
+  }
+
+  /**
+   * Get the timestamp of the object at the given path in the latest revision.
+   *
+   * @param path The TR-069 parameter path to get the object timestamp for.
+   * @returns The timestamp of the object in the latest revision, or undefined
+   * if not found.
+   */
+  public getObjectTimestamp(
+    path: string,
+  ): boolean | string | number | undefined {
+    console.log('Getting object timestamp for path:', path, 'with value:', this.getValue(path + this.TIMESTAMP_OBJECT_SUFFIX, false));  
+    console.log('Current revision:', this.currentRevision, 'Value cache:', JSON.stringify(this.valueCache, null, 2));
+
+    return this.getValue(path + this.TIMESTAMP_OBJECT_SUFFIX, false);
+  }
+
+  /**
+   * Save the timestamp of the object at the given path in the current revision.
+   *
+   * @param path The TR-069 parameter path to save the object timestamp for.
+   * @param timestamp The timestamp to save for the object.
+   */
+  public saveObjectTimestamp(
+    path: string,
+    timestamp: number,
+  ): void {
+    console.log('Saving object timestamp for path:', path, 'with timestamp:', timestamp);
+    this.saveValue(path + this.TIMESTAMP_OBJECT_SUFFIX, timestamp);
   }
 
   /**
