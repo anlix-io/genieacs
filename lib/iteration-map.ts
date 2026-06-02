@@ -1,6 +1,9 @@
-export type CachedValues = {
-  [key: string]: boolean | string | number | undefined | CachedValues;
-};
+export const DeletedValue = Symbol('DeletedValue');
+export type Deleted = typeof DeletedValue;
+export type CachedPrimitive =
+  boolean | string | number | undefined | Deleted;
+export type CachedValue = CachedPrimitive | { [key: string]: CachedValue };
+export type CachedValues = { [key: string]: CachedValue };
 
 /**
  * This is a map to undo the revision logic from genie. It stores the "revision"
@@ -16,8 +19,7 @@ export class IterationMapCache {
   private declare currentRevision: number;
   private declare valueCache: CachedValues[];
 
-  // private readonly ADD_OBJECT_SUFFIX = '__addObject';
-  // private readonly DELETE_OBJECT_SUFFIX = '__deleteObject';
+  private readonly SIZE_OBJECT_SUFFIX = '__size';
 
   public constructor() {
     this.currentRevision = 0;
@@ -26,10 +28,13 @@ export class IterationMapCache {
 
   private traversePath(
     path: string,
-    revision: CachedValues,
-  ): boolean | string | number | undefined  {
+    revision?: CachedValues,
+  ): boolean | string | number | undefined | Deleted {
+    // If there's no revision provided, nothing to read.
+    if (!revision) return undefined;
+
     const parts = path.split('.');
-    let current: CachedValues = revision;
+    let current: CachedValues | CachedPrimitive = revision;
 
     // Loop the part of the path
     for (const part of parts) {
@@ -39,13 +44,19 @@ export class IterationMapCache {
       // Return early if the part is not found in the current revision
       if (current[part] === undefined) return undefined;
 
-      // If the part is an object, continue traversing, otherwise return the
-      // value, otherwise return the found value
-      if (typeof current[part] === 'object' && current[part] !== null)
-        current = current[part];
-      else
-        return current[part];
+      // Return early if the part is marked as deleted
+      if (current[part] === DeletedValue) return DeletedValue;
+
+      // Continue traversing
+      current = current[part] as CachedValues;
     }
+
+    // Return if found
+    if (
+      typeof current === 'boolean' ||
+      typeof current === 'string' ||
+      typeof current === 'number'
+    ) return current;
 
     return undefined;
   }
@@ -56,13 +67,39 @@ export class IterationMapCache {
    * revision.
    *
    * @param path The TR-069 parameter path to get the value for.
+   * @param previousRevisionSearch Whether to search in the previous revisions
+   * if the value is not found in the latest revision.
+   *
    * @returns The value of the parameter in the latest revision, or undefined if
    * not found.
    */
-  public getValue(path: string): boolean | string | number | undefined {
+  public getValue(
+    path: string,
+    previousRevisionSearch = true,
+  ): boolean | string | number | undefined {
+    // If we only have to search in the latest revision, we can return early
+    // without looping
+    if (!previousRevisionSearch) {
+      const value = this.traversePath(
+        path,
+        this.valueCache[this.currentRevision],
+      );
+
+      // If the value is marked as deleted, return undefined
+      if (value === DeletedValue) return undefined;
+
+      // If the value is found and is not an object, return it, otherwise return
+      // undefined
+      if (value !== undefined && typeof value !== 'object') return value;
+      return undefined;
+    }
+
+    // Otherwise, loop the revisions until we find a value or reach the first
+    // revision
     for (let revision = this.currentRevision; revision >= 0; --revision) {
       const value = this.traversePath(path, this.valueCache[revision]);
-      if (value !== undefined) return value;
+      if (value === DeletedValue) return undefined;
+      if (value !== undefined && typeof value !== 'object') return value;
     }
 
     return undefined;
@@ -76,7 +113,7 @@ export class IterationMapCache {
    */
   public saveValue(
     path: string,
-    value: boolean | string | number,
+    value: boolean | string | number | Deleted,
   ): void {
     if (!this.valueCache[this.currentRevision])
       this.valueCache[this.currentRevision] = {};
@@ -87,7 +124,7 @@ export class IterationMapCache {
 
     // Loop the part of the path except the last one
     for (let partIndex = 0; partIndex < parts.length - 1; ++partIndex) {
-      const part = parts[partIndex];
+      const part = parts[partIndex]?.trim() ?? '';
 
       // Continue if the path part is an empty string
       if (part === '') continue;
@@ -113,6 +150,16 @@ export class IterationMapCache {
    */
   public incrementRevision(): void {
     this.currentRevision += 1;
+    if (!this.valueCache[this.currentRevision])
+      this.valueCache[this.currentRevision] = {};
+  }
+
+  /**
+   * Decrement the revision. This should be called to move back to the previous
+   * revision if needed.
+   */
+  public decrementRevision(): void {
+    if (this.currentRevision > 0) this.currentRevision -= 1;
   }
 
   /**
@@ -133,7 +180,16 @@ export class IterationMapCache {
     path: string,
   ): boolean | string | number | undefined {
     this.incrementRevision();
-    return this.getValue(path /* + this.ADD_OBJECT_SUFFIX */);
+    if (!path.endsWith('.')) path += '.';
+
+    // Check if we must return or let it add again
+    const shouldAdd =
+      this.getValue(path + this.SIZE_OBJECT_SUFFIX, false) === undefined;
+
+    // Return the last size if it exists
+    return shouldAdd ?
+      undefined :
+      this.getValue(path + this.SIZE_OBJECT_SUFFIX);
   }
 
   /**
@@ -148,7 +204,49 @@ export class IterationMapCache {
     path: string,
   ): boolean | string | number | undefined {
     this.incrementRevision();
-    return this.getValue(path /* + this.DELETE_OBJECT_SUFFIX */);
+
+    // Get the last part of the path
+    const lastPart = path
+      .split('.')
+      .filter((part: string) => part !== '')
+      .slice(-1)[0];
+
+    // If it ends with a number, change it to *
+    if (lastPart && !isNaN(Number(lastPart)))
+      path = path.slice(0, -lastPart.length) + '*';
+
+    // If not trailing dot, add it
+    if (!path.endsWith('.')) path += '.';
+
+    // Check if we must return or let it delete again
+    const shouldDelete =
+      this.getValue(path + this.SIZE_OBJECT_SUFFIX, false) === undefined;
+
+    // Return the last size if it exists
+    return shouldDelete ?
+      undefined :
+      this.getValue(path + this.SIZE_OBJECT_SUFFIX);
+  }
+
+  /**
+   * Get the size of the object at the given path in the revisions
+   *
+   * @param path - The TR-069 parameter path to get the object size for.
+   */
+  public getObjectSize(path: string): boolean | string | number | undefined {
+    // Get the last part of the path
+    const lastPart = path
+      .split('.')
+      .filter((part: string) => part !== '')
+      .slice(-1)[0];
+
+    // If it ends with a number, change it to *
+    if (lastPart && !isNaN(Number(lastPart)))
+      path = path.slice(0, -lastPart.length) + '*';
+
+    // If not trailing dot, add it
+    if (!path.endsWith('.')) path += '.';
+    return this.getValue(path + this.SIZE_OBJECT_SUFFIX);
   }
 
   /**
@@ -174,19 +272,18 @@ export class IterationMapCache {
   public setValue(
     path: string, value: boolean | string | number
   ): void {
-    this.incrementRevision();
     this.saveValue(path, value);
   }
 
   /**
-   * Add an object at the given path with the given value. This is just an alias
-   * for setValue
+   * Add an object at the given path with the given value.
    *
    * @param path The TR-069 parameter path to add the object at.
    * @param amount The amount of the object to add.
    */
   public addObject(path: string, amount: boolean | string | number): void {
-    this.setValue(path /* + this.ADD_OBJECT_SUFFIX */, amount);
+    if (!path.endsWith('.')) path += '.';
+    this.saveValue(path + this.SIZE_OBJECT_SUFFIX, amount);
   }
 
   /**
@@ -198,20 +295,27 @@ export class IterationMapCache {
    * @param amount The amount of the object to delete.
    */
   public deleteObject(path: string, amount: boolean | string | number): void {
-    this.setValue(path /* + this.DELETE_OBJECT_SUFFIX */, amount);
+    // Clear the structure of the deleted object in the current revision to
+    // avoid returning already deleted objects/values
+    // Build the path with DeletedValue in the last part to mark it as deleted
+    const basePath = path.split('*')[0];
+    this.saveValue(basePath, DeletedValue);
 
-    // Search all values that start with the path and mark then undefined to the
-    // current revision to avoid returning already deleted objects/values
-    const pathWithDot = path.endsWith('.') ? path : path + '.';
-    // Loop every revision
-    for (let revision = this.currentRevision; revision >= 0; --revision) {
-      // Loop every path in the revision
-      for (const key in this.valueCache[revision]) {
-        // If exists, save as undefined to the current revision to mark it as
-        // deleted
-        if (key === path || key.startsWith(pathWithDot))
-          this.valueCache[this.currentRevision][key] = undefined;
-      }
-    }
+    // Get the last part of the path
+    const lastPart = path
+      .split('.')
+      .filter((part: string) => part !== '')
+      .slice(-1)[0];
+
+    // If it ends with a number, change it to *
+    if (lastPart && !isNaN(Number(lastPart)))
+      path = path.slice(0, -lastPart.length) + '*';
+
+    // If not trailing dot, add it
+    if (!path.endsWith('.')) path += '.';
+
+    // Save the amount to return it when getDeleteObjectValue is called with the
+    // path of the deleted
+    this.saveValue(path + this.SIZE_OBJECT_SUFFIX, amount);
   }
 }
