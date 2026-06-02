@@ -180,9 +180,6 @@ export class IterationMapCache {
   public getObjectTimestamp(
     path: string,
   ): boolean | string | number | undefined {
-    console.log('Getting object timestamp for path:', path, 'with value:', this.getValue(path + this.TIMESTAMP_OBJECT_SUFFIX, false));  
-    console.log('Current revision:', this.currentRevision, 'Value cache:', JSON.stringify(this.valueCache, null, 2));
-
     return this.getValue(path + this.TIMESTAMP_OBJECT_SUFFIX, false);
   }
 
@@ -196,7 +193,6 @@ export class IterationMapCache {
     path: string,
     timestamp: number,
   ): void {
-    console.log('Saving object timestamp for path:', path, 'with timestamp:', timestamp);
     this.saveValue(path + this.TIMESTAMP_OBJECT_SUFFIX, timestamp);
   }
 

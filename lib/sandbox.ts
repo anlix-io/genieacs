@@ -418,8 +418,6 @@ export function flog(...args: any[]): void {
     !FORCE_CUSTOM_SCRIPT_LOGGING
   ) return;
 
-  console.log(...args);
-
   if (!state.sessionContext.customScriptInfo?.lastMessageId)
     state.sessionContext.customScriptInfo.lastMessageId = 1;
   else state.sessionContext.customScriptInfo.lastMessageId++;
