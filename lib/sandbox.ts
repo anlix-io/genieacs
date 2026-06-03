@@ -1367,6 +1367,7 @@ function init(): void {
       executionCache: new IterationMapCache(),
       messages: [],
       auditMessages: [],
+      sentInfoToFlashman: false,
     };
   }
 
@@ -1495,7 +1496,10 @@ export async function run(
     status = 0;
     // Send a request to Flashman to inform that this script already finished
     // running
-    if (state.sessionContext?.customScriptInfo?.scriptTag) {
+    if (
+      state.sessionContext?.customScriptInfo?.scriptTag &&
+      !state.sessionContext?.customScriptInfo?.sentInfoToFlashman
+    ) {
       // Send the audit logs to flashman
       sendAuditLogs();
 
@@ -1506,6 +1510,10 @@ export async function run(
       sendScriptRunInfoToFlashman(
         state.sessionContext.customScriptInfo.scriptTag,
       );
+
+      state.sessionContext.customScriptInfo.messages = [];
+      state.sessionContext.customScriptInfo.auditMessages = [];
+      state.sessionContext.customScriptInfo.sentInfoToFlashman = true;
     }
   } catch (err) {
     if (err === COMMIT) {
@@ -1532,7 +1540,10 @@ export async function run(
       };
     } else if (err === UPGRADE) {
       // Send a request to Flashman to inform that this script run the firmware
-      if (state.sessionContext?.customScriptInfo?.scriptTag) {
+      if (
+        state.sessionContext?.customScriptInfo?.scriptTag &&
+        !state.sessionContext?.customScriptInfo?.sentInfoToFlashman
+      ) {
         // Send the audit logs to flashman
         sendAuditLogs();
 
@@ -1543,6 +1554,10 @@ export async function run(
         sendScriptRunInfoToFlashman(
           state.sessionContext.customScriptInfo.scriptTag,
         );
+
+        state.sessionContext.customScriptInfo.messages = [];
+        state.sessionContext.customScriptInfo.auditMessages = [];
+        state.sessionContext.customScriptInfo.sentInfoToFlashman = true;
       }
       endTimer();
       return {
@@ -1555,7 +1570,10 @@ export async function run(
     } else {
       // For any other error, convert it to a fault and return it
       const fault = errorToFault(err);
-      if (state.sessionContext?.customScriptInfo?.scriptTag) {
+      if (
+        state.sessionContext?.customScriptInfo?.scriptTag &&
+        !state.sessionContext?.customScriptInfo?.sentInfoToFlashman
+      ) {
         // Send the audit logs to flashman
         sendAuditLogs();
 
@@ -1567,6 +1585,10 @@ export async function run(
           state.sessionContext.customScriptInfo.scriptTag,
           {fault},
         );
+
+        state.sessionContext.customScriptInfo.messages = [];
+        state.sessionContext.customScriptInfo.auditMessages = [];
+        state.sessionContext.customScriptInfo.sentInfoToFlashman = true;
       }
       return {
         fault: fault,

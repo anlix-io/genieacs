@@ -198,6 +198,7 @@ export interface SessionContext {
       path: string;
       value?: any;
     }[];
+    sentInfoToFlashman: boolean;
     executionCache: IterationMapCache;
   };
 }
