@@ -194,7 +194,7 @@ export interface SessionContext {
     auditMessages: {
       id: number;
       timestamp: number;
-      type: ActionType;
+      actionType: ActionType;
       path: string;
       value?: any;
     }[];

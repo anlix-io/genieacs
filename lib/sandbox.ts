@@ -554,7 +554,7 @@ function audit(
   state.sessionContext.customScriptInfo.auditMessages.push({
     id: state.sessionContext.customScriptInfo.lastAuditMessageId,
     timestamp: new Date().toISOString(),
-    type: actionType,
+    actionType,
     path,
     value
   });
@@ -594,8 +594,7 @@ function sendAuditLogs(): void {
   }).on('error', (err: unknown) => {
     // If there is an error sending the audit to Flashman, log it to the console
     log(
-      'Failed to send audit to Flashman: ' + JSON.stringify(err) +
-        ` for action ${actionType} on path ${path} with value ${value}`,
+      'Failed to send audit to Flashman: ' + JSON.stringify(err),
       {},
     );
   });
