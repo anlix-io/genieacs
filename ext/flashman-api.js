@@ -497,7 +497,7 @@ const deleteTaskCallbacks = async function(args, callback) {
       success: false,
       message: 'Incomplete arguments',
     };
-    return callback(null, cacheSyncDeviceDATA);
+    return callback(null, cacheDeleteTaskCallbackDATA);
   }
 
   // Send an empty body because request is dumb and won't interpret result body
@@ -710,7 +710,8 @@ const getFirmwareFile = async function(args, callback) {
   // Call Flashman
   let response = await sendFlashmanRequest(
     'GET',
-    `product-class/${params.productClass}/version/${params.version}/firmware`,
+    `product-class/${encodeURIComponent(params.productClass)}/version/` +
+      `${encodeURIComponent(params.version)}/firmware`,
     {},
   );
 
@@ -733,6 +734,104 @@ const getFirmwareFile = async function(args, callback) {
   return callback(null, cacheGetFirmwareFileDATA);
 };
 
+let cacheSendCustomScriptEventIDX = '';
+let cacheSendCustomScriptEventDATA = {};
+/**
+ * Calls Flashman to register a custom script event for a device.
+ *
+ * @param {array<object|string>} args - Array of objects with the arguments.
+ * @param {function|undefined} callback - Callback function.
+ *
+ * @return {void} It doesn't return anything as it is not needed
+ */
+async function sendCustomScriptEvent(args, callback) {
+  let params;
+  const callidx = args[1];
+
+  try {
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    cacheSendCustomScriptEventDATA = {
+      success: false,
+      message: 'Invalid JSON in sendCustomScriptEvent',
+    };
+    return callback(null, cacheSendCustomScriptEventDATA);
+  }
+
+  // Avoid call to flashman twice from provision
+  if (cacheSendCustomScriptEventIDX === callidx) {
+    return callback(null, cacheSendCustomScriptEventDATA);
+  }
+
+  // Validate input
+  if (!params || !params.acsId || !params.event) {
+    cacheSendCustomScriptEventIDX = callidx;
+    cacheSendCustomScriptEventDATA = {
+      success: false,
+      message: 'Incomplete arguments in sendCustomScriptEvent',
+    };
+    return callback(null, cacheSendCustomScriptEventDATA);
+  }
+
+  // Send the request to Flashman
+  const url = `acs-id/${encodeURIComponent(params.acsId)}/script` +
+    `/event/${encodeURIComponent(params.event)}`;
+  const result = await sendFlashmanRequest('POST', url, params);
+
+  // Save the result in cache and return it
+  cacheSendCustomScriptEventIDX = callidx;
+  cacheSendCustomScriptEventDATA = result;
+  return callback(null, cacheSendCustomScriptEventDATA);
+}
+
+let cacheSendCustomScriptExecutionRequestIDX = '';
+let cacheSendCustomScriptExecutionRequestDATA = {};
+/**
+ * Calls Flashman to register a custom script execution request for a device.
+ *
+ * @param {array<object|string>} args - Array of objects with the arguments.
+ * @param {function|undefined} callback - Callback function.
+ *
+ * @return {void} It doesn't return anything as it is not needed
+ */
+async function sendCustomScriptExecutionRequest(args, callback) {
+  let params;
+  const callidx = args[1];
+
+  try {
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    cacheSendCustomScriptExecutionRequestDATA = {
+      success: false,
+      message: 'Invalid JSON in sendCustomScriptExecutionRequest',
+    };
+    return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
+
+  // Avoid call to flashman twice from provision
+  if (cacheSendCustomScriptExecutionRequestIDX === callidx) {
+    return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
+
+  // Validate input
+  if (!params || !params.acsId || !params.mac) {
+    cacheSendCustomScriptExecutionRequestIDX = callidx;
+    cacheSendCustomScriptExecutionRequestDATA = {
+      success: false,
+      message: 'Incomplete arguments in sendCustomScriptExecutionRequest',
+    };
+    return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
+
+  // Send the request to Flashman
+  const url = `acs-id/${encodeURIComponent(params.acsId)}/script/initiate`;
+  const result = await sendFlashmanRequest('POST', url, params);
+
+  // Save the result in cache and return it
+  cacheSendCustomScriptExecutionRequestIDX = callidx;
+  cacheSendCustomScriptExecutionRequestDATA = result;
+  return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+}
 
 /**
  * @exports controllers/external-genieacs/devices-api
@@ -751,3 +850,5 @@ exports.syncDeviceDiagnostics = syncDeviceDiagnostics;
 exports.getChosenWan = getChosenWan;
 exports.getMACField = getMACField;
 exports.getFirmwareFile = getFirmwareFile;
+exports.sendCustomScriptEvent = sendCustomScriptEvent;
+exports.sendCustomScriptExecutionRequest = sendCustomScriptExecutionRequest;

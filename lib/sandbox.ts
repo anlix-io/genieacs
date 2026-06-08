@@ -17,6 +17,22 @@
  * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+/**
+ * - What are revisions?
+ * Every time that genie steps into a declare that must send it to the CPE, it
+ * throws a COMMIT symbol to make the functions in the session.ts do the RPCs
+ * and requests to the CPE. Then it starts the script again with the revision +
+ * 1. And now, when it steps into the same declare, it checks the previous
+ * revision to get the field values and doesn't send the get again to the CPE.
+ *
+ * It only throws COMMIT when it surpasses the maxRevision (the one that
+ * increases every time the script re-runs).
+ * 
+ * So, if 1 declare is not executed in the current "revision", the next declares
+ * will use old revisions to get their values and won't throw COMMIT as
+ * expected.
+ */
+
 import * as vm from "vm";
 import seedrandom from "seedrandom";
 import * as device from "./device";
@@ -24,9 +40,10 @@ import * as extensions from "./extensions";
 import * as logger from "./logger";
 import * as scheduling from "./scheduling";
 import Path from "./common/path";
-import { Fault, SessionContext, ScriptResult } from "./types";
+import { Fault, SessionContext, ScriptResult, ActionType } from "./types";
 import { metricsExporter } from "./metrics";
 import request from "request";
+import { IterationMapCache } from "./iteration-map";
 
 // Used for throwing to exit user script and commit
 const COMMIT = Symbol();
@@ -50,7 +67,7 @@ const FLASHMAN_PORT = process.env.FLM_WEB_PORT || 8000;
 const FLASHMAN_URL =
   'http://'+(process.env.FLM_WEB_HOST || 'localhost') + `:${FLASHMAN_PORT}`;
 
-let state;
+let state: any;
 
 const runningExtensions = new WeakMap<
   SessionContext,
@@ -401,37 +418,25 @@ export function flog(...args: any[]): void {
     !FORCE_CUSTOM_SCRIPT_LOGGING
   ) return;
 
+  if (!state.sessionContext.customScriptInfo?.lastMessageId)
+    state.sessionContext.customScriptInfo.lastMessageId = 1;
+  else state.sessionContext.customScriptInfo.lastMessageId++;
+
   // Prepare the message to log
   const message = '[ INFO  ] ' + args
     .map((arg) => typeof arg === 'object' ? JSON.stringify(arg) : arg)
     .join(" ");
-  
-  // Send the message to Flashman
-  request({
-    url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/` +
-      `${state.sessionContext.customScriptInfo?.scriptTag}/log`,
-    method: 'POST',
-    headers: {
-      'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
-    },
-    json: {
-      timestamp: new Date().toISOString(),
-      type: 'log',
-      message: message,
-    },
-  }).on('response', (response) => {
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      log(
-        'Failed to log script to Flashman. ' +
-        `Status code: ${response.statusCode}` +
-        `Response body: ${JSON.stringify(response.body)}`,
-        {}
-      );
-    }
-  }).on('error', (err) => {
-    // If there is an error sending the log to Flashman, log it to the console
-    log('Failed to send log to Flashman: ' + JSON.stringify(err), {});
+
+  // If the message array does not exists yet, create it
+  if (!state.sessionContext.customScriptInfo?.messages)
+    state.sessionContext.customScriptInfo.messages = [];
+
+  // Push the message to the array
+  state.sessionContext.customScriptInfo.messages.push({
+    id: state.sessionContext.customScriptInfo.lastMessageId,
+    timestamp: new Date().toISOString(),
+    type: 'log',
+    message
   });
 }
 
@@ -458,25 +463,50 @@ export function ferror(...args: any[]): void {
     !FORCE_CUSTOM_SCRIPT_LOGGING
   ) return;
 
+  if (!state.sessionContext.customScriptInfo?.lastMessageId)
+    state.sessionContext.customScriptInfo.lastMessageId = 1;
+  else state.sessionContext.customScriptInfo.lastMessageId++;
+
   // Prepare the message to log
   const message = '[ ERROR ] ' + args
     .map((arg) => typeof arg === 'object' ? JSON.stringify(arg) : arg)
     .join(" ");
-  
+
+  // If the message array does not exists yet, create it
+  if (!state.sessionContext.customScriptInfo?.messages)
+    state.sessionContext.customScriptInfo.messages = [];
+
+  // Push the message to the array
+  state.sessionContext.customScriptInfo.messages.push({
+    id: state.sessionContext.customScriptInfo.lastMessageId,
+    timestamp: new Date().toISOString(),
+    type: 'error',
+    message
+  });
+}
+
+/**
+ * Send the logs to flashman all at once.
+ */
+export function sendFlashmanLogs(): void {
+  // If there is no message to send or no script tag, return early
+  if (
+    !state.sessionContext.customScriptInfo?.scriptTag ||
+    !state.sessionContext?.customScriptInfo?.messages ||
+    state.sessionContext.customScriptInfo.messages.length === 0
+  ) return;
+
   // Send the message to Flashman
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/` +
-      `${state.sessionContext.customScriptInfo?.scriptTag}/log`,
+      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
+      `${encodeURIComponent(state.sessionContext.customScriptInfo?.scriptTag)}` +
+      `/log`,
     method: 'POST',
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
     },
-    json: {
-      timestamp: new Date().toISOString(),
-      type: 'error',
-      message: message,
-    },
+    json: state.sessionContext.customScriptInfo.messages,
   }).on('response', (response) => {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       log(
@@ -486,34 +516,72 @@ export function ferror(...args: any[]): void {
         {}
       );
     }
-  }).on('error', (err) => {
+  }).on('error', (err: unknown) => {
     // If there is an error sending the log to Flashman, log it to the console
     log('Failed to send error log to Flashman: ' + JSON.stringify(err), {});
   });
 }
 
-enum ActionType {
-  ADD_OBJECT = "addObject",
-  DELETE_OBJECT = "deleteObject",
-  SET_VALUE = "setValue",
+
+/**
+ * This function saves an audit log to send to Flashman afterwards
+ *
+ * @param actionType - The type of action that was performed (e.g. "addObject",
+ * "deleteObject", "setValue")
+ * @param path - The path of the parameter that was affected.
+ * @param value - The value that was set, if applicable.
+ * @returns void
+ */
+function audit(
+  actionType: ActionType,
+  path: string,
+  value?: any,
+): void {
+  // If not initialized, throw an error
+  if (!state.sessionContext.customScriptInfo?.initialized)
+    throw new Error("audit: Sandbox not initialized");
+
+  // Increment the message id to keep the order
+  if (!state.sessionContext.customScriptInfo?.lastAuditMessageId)
+    state.sessionContext.customScriptInfo.lastAuditMessageId = 1;
+  else state.sessionContext.customScriptInfo.lastAuditMessageId++;
+
+  // If the message array does not exists yet, create it
+  if (!state.sessionContext.customScriptInfo?.auditMessages)
+    state.sessionContext.customScriptInfo.auditMessages = [];
+
+  // Push the message to the array
+  state.sessionContext.customScriptInfo.auditMessages.push({
+    id: state.sessionContext.customScriptInfo.lastAuditMessageId,
+    timestamp: new Date().toISOString(),
+    actionType,
+    path,
+    value
+  });
 }
 
-function audit(actionType: ActionType, path: string, value?: any): void {
+/**
+ * This function sends all the audit logs to Flashman
+ */
+export function sendAuditLogs(): void {
+  // If there is no message to send or no script tag, return early
+  if (
+    !state.sessionContext.customScriptInfo?.scriptTag ||
+    !state.sessionContext?.customScriptInfo?.auditMessages ||
+    state.sessionContext.customScriptInfo.auditMessages.length === 0
+  ) return;
+
   // Send the request to Flashman for auditing
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/` +
-      `${state.sessionContext.customScriptInfo?.scriptTag}/audit`,
+      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
+      `${encodeURIComponent(state.sessionContext.customScriptInfo?.scriptTag)}` +
+      `/audit`,
     method: 'POST',
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
     },
-    json: {
-      timestamp: new Date().toISOString(),
-      type: actionType,
-      path: path,
-      value: value,
-    },
+    json: state.sessionContext.customScriptInfo.auditMessages,
   }).on('response', (response) => {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       log(
@@ -523,14 +591,116 @@ function audit(actionType: ActionType, path: string, value?: any): void {
         {}
       );
     }
-  }).on('error', (err) => {
+  }).on('error', (err: unknown) => {
     // If there is an error sending the audit to Flashman, log it to the console
     log(
-      'Failed to send audit to Flashman: ' + JSON.stringify(err) +
-        ` for action ${actionType} on path ${path} with value ${value}`,
+      'Failed to send audit to Flashman: ' + JSON.stringify(err),
       {},
     );
   });
+}
+
+/**
+ * Gets the value of a parameter at the specified path directly from the device
+ * data at the last revision, bypassing the ParameterWrapper getters and their
+ * reliance on state.revision. If the value is not found, it forces a COMMIT to
+ * make genieacs fetch the parameter and re-run the script on the next
+ * iteration.
+ *
+ * @param {string} path - The path of the parameter to get.
+ */
+function getLastRevisionValueOrCommit(
+  path: string,
+  where: 'value' | 'size' = 'value',
+): boolean | number | string | undefined | null {
+  // Read the value directly at the highest revision available instead of
+  // relying on the ParameterWrapper getter (which reads at state.revision).
+  //
+  // Why this matters: every script re-run resets state.revision to 0, and
+  // commit() only advances it by 1 per call. When the user calls getValue()
+  // after init() — which on subsequent runs returns early without performing
+  // the commits it normally does — state.revision stays very low (e.g. 1),
+  // while data fetched in earlier iterations lives at higher revisions
+  // (e.g. 3 or 4). VersionedMap.get(path, 1) would then return NONEXISTENT
+  // because revisions[1] was filled with NONEXISTENT when the value was
+  // first set at revision 3+. Reading at maxRevision sees the latest data
+  // regardless of how many commits the current run made.
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const readRevision = Math.max(state.maxRevision, state.revision);
+  const parsedPath = Path.parse(path);
+  const deviceData = state.sessionContext.deviceData;
+  const unpacked = device.unpack(deviceData, parsedPath, readRevision);
+  if (where === 'value') {
+    const savedTime = executionCache.getObjectTimestamp(path);
+
+    // Save the timestamp to not execute the same declare again
+    executionCache.saveObjectTimestamp(
+      path,
+      SandboxDate.now(null, null),
+    );
+
+    // If we have the parameter, return only if it is as new as possible
+    if (unpacked.length) {
+      const attrs = deviceData.attributes.get(unpacked[0], readRevision);
+      const valueAttr = attrs?.value?.[1];
+      const time = attrs?.value?.[0] ?? savedTime;
+
+      // Only return the value if it has a timestamp and it's as new as possible
+      if (
+        time && time >= SandboxDate.now(null, null)
+      ) return valueAttr?.[0] as boolean | number | string | undefined | null;
+    } else if (savedTime && savedTime >= SandboxDate.now(null, null)) {
+      // If we don't have the parameter but we have a timestamp for it, return
+      // null
+      // This might be the case where the parameter doesn't exist in the TR-069
+      // tree
+      return null;
+    }
+  } else if (where === 'size') {
+    // Get the size
+    const parsedBasePath = Path.parse(path);
+    const unpackedBase = device.unpack(
+      deviceData,
+      parsedBasePath,
+      readRevision,
+    );
+    const size = unpackedBase.length;
+
+    // Get the time we got this path, remove the * or [...] as they might not
+    // exist and thus return an empty path
+    const upperPath = path
+      .replace(/\.[*[].*$/, '')
+      .replace(/\.$/, '');
+    const parsedUpperPath = Path.parse(upperPath);
+    const unpackedUpper = device.unpack(
+      deviceData,
+      parsedUpperPath,
+      readRevision,
+    );
+    const attrs = deviceData.attributes.get(unpackedUpper[0], readRevision);
+    const savedTime = executionCache.getObjectTimestamp(path);
+    const time = attrs?.object?.[0] ?? savedTime;
+
+    // Save the timestamp
+    // This can save the infinite loop caused by always trying to commit a path
+    // that doesn't exist
+    executionCache.saveObjectTimestamp(
+      path,
+      time ?? SandboxDate.now(null, null),
+    );
+
+    if (savedTime && time && time >= SandboxDate.now(null, null)) return size;
+  }
+
+  // The value isn't in deviceData yet. Force genieacs to fetch the
+  // parameter and re-run the script on the next iteration by throwing
+  // COMMIT. We jump state.revision up to maxRevision so the next commit()
+  // trips the `revision === maxRevision + 1` condition and actually throws.
+  state.revision = state.maxRevision;
+  commit(); // throws COMMIT because of the state.revision we just set
+
+  // Unreachable
+  return UNDEFINED;
 }
 
 /**
@@ -551,7 +721,7 @@ export function getValue(path: string): boolean | number | string | undefined {
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`getValue() called with a non-string path: ${path}`);
-    return UNDEFINED;
+    throw new Error("getValue() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -560,25 +730,46 @@ export function getValue(path: string): boolean | number | string | undefined {
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("getValue() called with an empty path.");
-    return UNDEFINED;
+    throw new Error("getValue() called with an empty path");
   }
 
   // If the path has trailing dot, remove it
   if (path.endsWith(".")) path = path.slice(0, -1);
 
+  // If the path contains a * or [...], return an error
+  if (
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
+  ) {
+    ferror(
+      'getValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+    throw new Error(
+      'getValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+  }
+
+  // If we have this field in cache, return early
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getValue(path);
+  if (cachedValue !== undefined) return cachedValue ?? undefined;
+
   // Get the value
-  const parameter = declare(
+  declare(
     path,
     { value: SandboxDate.now(null, null), path: SandboxDate.now(null, null) },
-    null,
-  ) as {
-    value?: [boolean | number | string, string];
-  };
+    {},
+  );
 
-  // If this is a valid parameter with a value, return it
-  if (parameter?.value?.[0]) return parameter.value[0];
+  // Try getting the parameter, it might throw
+  const parameter = getLastRevisionValueOrCommit(path);
 
-  return UNDEFINED;
+  // Save the value to next iterations
+  executionCache.saveValue(path, parameter ?? null);
+
+  return parameter ?? undefined;
 }
 
 /**
@@ -599,7 +790,7 @@ export function setValue(
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`setValue() called with a non-string path: ${path}`);
-    return UNDEFINED;
+    throw new Error("setValue() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -608,11 +799,26 @@ export function setValue(
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("setValue() called with an empty path.");
-    return UNDEFINED;
+    throw new Error("setValue() called with an empty path");
   }
 
   // If the path has trailing dot, remove it
   if (path.endsWith(".")) path = path.slice(0, -1);
+
+  // If the path contains a * or [...], return an error
+  if (
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
+  ) {
+    ferror(
+      'setValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+    throw new Error(
+      'setValue() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+  }
 
   // Check if the value is of valid type
   if (
@@ -621,14 +827,28 @@ export function setValue(
     typeof value !== "string"
   ) {
     ferror(`setValue() called with an invalid value type: ${typeof value}.`);
-    return false;
+    throw new Error(
+      `setValue() called with an invalid value type: ${typeof value}.`,
+    );
   }
+
+  // Try getting the setted value
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getSettedValue(path);
+  if (cachedValue !== undefined && cachedValue === value) return true;
+
+  // Save the setted value to next iterations
+  executionCache.setValue(path, value);
 
   // Audit this setValue action before sending
   audit(ActionType.SET_VALUE, path, value);
 
   // Set the value
-  declare(path, null, { value: value });
+  declare(path, {}, { value: value });
+
+  // Force committing the changes
+  state.revision = state.maxRevision;
+  commit();
 
   return true;
 }
@@ -650,7 +870,7 @@ export function addObject(
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`addObject() called with a non-string path: ${path}`);
-    return UNDEFINED;
+    throw new Error("addObject() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -659,25 +879,46 @@ export function addObject(
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("addObject() called with an empty path.");
-    return UNDEFINED;
+    throw new Error("addObject() called with an empty path");
   }
 
-  // If the path does not end with a * or [...], return an error
-  if (!path.endsWith("*") && !(/\[[\w=\d]*\]$/).test(path)) {
+  // If the path ends with a dot, remove it
+  if (path.endsWith(".")) path = path.slice(0, -1);
+
+  // If the path has a * or [...], return an error
+  if (
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
+  ) {
     ferror(
-      'addObject() called with a path that does not end with "*"' +
-        `or [...]: ${path}.`,
+      'addObject() called with a path that contains invalid characters: ' +
+      path + '.'
     );
-    return UNDEFINED;
+    throw new Error(
+      'addObject() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
   }
+
+  // Make the path end in .*
+  path = path + ".*";
+
+  // If we already have a cached size for this path, use it to avoid unnecessary
+  // declares and COMMITs
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getAddObjectValue(path);
+  if (cachedValue !== undefined) return cachedValue;
 
   // Get the amount of objects already present at the path
-  const parameter = declare(
+  declare(
     path,
     { path: SandboxDate.now(null, null) },
-    null,
+    {},
   ) as { size?: number };
-  const currentSize = parameter?.size ?? 0;
+  const parameter =
+    executionCache.getObjectSize(path) ??
+    getLastRevisionValueOrCommit(path, 'size');
+  const currentSize = parameter ?? 0;
 
   // If currentSize is undefined, return an error
   if (typeof currentSize !== 'number') {
@@ -685,11 +926,16 @@ export function addObject(
       'Unable to determine the current size of objects at path:' +
        ` ${path}.`,
     );
-    return UNDEFINED;
+    throw new Error(
+      `Unable to determine the current size of objects at path: ${path}`,
+    );
   }
 
   // The new size will be current size plus 1 that we are creating
   const newSize = currentSize + 1;
+
+  // Save the value to next iterations
+  if (parameter !== UNDEFINED) executionCache.addObject(path, newSize);
 
   // Audit this addition
   audit(ActionType.ADD_OBJECT, path, newSize);
@@ -700,6 +946,10 @@ export function addObject(
     { path: SandboxDate.now(null, null) },
     { path: newSize },
   ) as { path?: string };
+
+  // Force committing the changes
+  state.revision = state.maxRevision;
+  commit();
 
   return newSize;
 }
@@ -721,7 +971,7 @@ export function deleteObject(
   // If the path is not a string, return an error
   if (typeof path !== "string") {
     ferror(`deleteObject() called with a non-string path: ${path}`);
-    return false;
+    throw new Error("deleteObject() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -730,16 +980,44 @@ export function deleteObject(
   // If the path is empty, return an error
   if (path.length === 0) {
     ferror("deleteObject() called with an empty path.");
-    return false;
+    throw new Error("deleteObject() called with an empty path");
   }
 
+  // If the path ends with a dot, remove it
+  if (path.endsWith(".")) path = path.slice(0, -1);
+
+  // If the path has a * or [...], return an error
+  if (
+    path.includes("*") ||
+    (/\[\]|\[\w+:\w+(,\w+:\w+)*\]/).test(path)
+  ) {
+    ferror(
+      'deleteObject() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+    throw new Error(
+      'deleteObject() called with a path that contains invalid characters: ' +
+      path + '.'
+    );
+  }
+
+  // If we already have a cached size for this path, use it to avoid unnecessary
+  // declares and COMMITs
+  const executionCache = state.sessionContext.customScriptInfo.executionCache;
+  const cachedValue = executionCache.getDeleteObjectValue(path);
+  if (cachedValue !== undefined) return true;
+
+
   // Get the amount of objects already present at the path
-  const parameter = declare(
+  declare(
     path,
     { path: SandboxDate.now(null, null) },
-    null,
+    {},
   ) as { size?: number };
-  const currentSize = parameter?.size ?? 1;
+  const parameter =
+    executionCache.getObjectSize(path) ??
+    getLastRevisionValueOrCommit(path, 'size');
+  const currentSize = parameter ?? 1;
 
   // If currentSize is undefined, return an error
   if (typeof currentSize !== 'number') {
@@ -747,21 +1025,45 @@ export function deleteObject(
       'Unable to determine the current size of objects at path:' +
        ` ${path}.`,
     );
-    return false;
+    throw new Error(
+      `Unable to determine the current size of objects at path: ${path}`,
+    );
   }
 
   // The new size will be current size minus 1 that we are deleting
   const newSize = currentSize - 1;
 
+  // If the size is < 0, return
+  if (newSize < 0) {
+    ferror(
+      `deleteObject() called resulting in a negative size: ${newSize}.` +
+        ` Current size was: ${currentSize}`,
+    );
+    return false;
+  }
+
+  // Save the value to next iterations
+  if (parameter !== UNDEFINED) executionCache.deleteObject(path, newSize);
+
   // Audit this deletion
   audit(ActionType.DELETE_OBJECT, path, newSize);
 
   // Delete the last object
+  // If not wildcard, set the path size to 0
+  // Case of X.Y.Z.* -> subtract the size
+  // Case of X.Y.Z.[...] -> subtract the size
+  // Case of X.Y.Z.2 -> delete the object at index 2, so the size is 0 for it
+  const isWildcard =
+    path.endsWith("*") || (/\[\]|\[\w+:\w+(,\w+:\w+)*\]$/).test(path);
   declare(
     path,
     { path: SandboxDate.now(null, null) },
-    { path: newSize },
+    { path: isWildcard ? newSize : 0 },
   ) as { path?: string };
+
+  // Force committing the changes
+  state.revision = state.maxRevision;
+  commit();
 
   return true;
 }
@@ -784,7 +1086,7 @@ export function updateFirmware(version: string): void {
     throw new Error("updateFirmware: Sandbox not initialized");
 
   const acsId = state.sessionContext.deviceId;
-  const productClass = (declare('DeviceID.ProductClass', {value: 1}, null) as {
+  const productClass = (declare('DeviceID.ProductClass', {value: 1}, {}) as {
     value?: [boolean | number | string, string];
   })?.value?.[0];
 
@@ -871,6 +1173,16 @@ export function updateFirmware(version: string): void {
     {value: SandboxDate.now(null, null)},
   );
 
+  // Force committing the changes
+  state.revision = state.maxRevision;
+
+  // Catch and throw UPGRADE to end the provision
+  try {
+    commit();
+  } catch (_error) {
+    throw UPGRADE;
+  }
+
   throw UPGRADE;
 }
 
@@ -885,13 +1197,14 @@ export function updateFirmware(version: string): void {
  * @returns {Promise<void>} A promise that resolves when the request is
  * successful, or rejects with an error if the request fails.
  */
-function sendScriptRunInfoToFlashman(
+export function sendScriptRunInfoToFlashman(
   scriptTag: string,
   runInfo: {fault?: Fault, started?: boolean} = {},
 ): void {
   request({
     url: `${FLASHMAN_URL}/acs/acs-id/` +
-      `${state.sessionContext.deviceId}/script/${scriptTag}/run`,
+      `${encodeURIComponent(state.sessionContext.deviceId)}/script/` +
+      `${encodeURIComponent(scriptTag)}/run`,
     method: 'POST',
     headers: {
       'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
@@ -911,9 +1224,9 @@ function sendScriptRunInfoToFlashman(
         {}
       );
     }
-  }).on('error', (err) => {
+  }).on('error', (err: unknown) => {
     log(
-      `Error sending script run info to Flashman: ${err.message}`,
+      `Error sending script run info to Flashman: ${(err as Error).message}`,
       {}
     );
   });
@@ -924,19 +1237,16 @@ function sendScriptRunInfoToFlashman(
  * function to retrieve the MAC address field from Flashman.
  */
 function getMACAddress(): string | null {
-  if (state.sessionContext?.customScriptInfo?.mac)
-    return state.sessionContext.customScriptInfo.mac;
-
-  const genieIDDeclare = declare('DeviceID.ID', {value: 1}, null) as {
+  const genieIDDeclare = declare('DeviceID.ID', {value: 1}, {}) as {
     value?: [boolean | number | string, string];
   };
-  const ouiDeclare = declare('DeviceID.OUI', {value: 1}, null) as {
+  const ouiDeclare = declare('DeviceID.OUI', {value: 1}, {}) as {
     value?: [boolean | number | string, string];
   };
   const modelClassDeclare = declare(
     'DeviceID.ProductClass',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
@@ -945,7 +1255,7 @@ function getMACAddress(): string | null {
   const isIGDModel = (declare(
     'InternetGatewayDevice.ManagementServer.URL',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   }).value;
@@ -954,21 +1264,21 @@ function getMACAddress(): string | null {
   const modelNameDeclare = declare(
     prefix + '.DeviceInfo.ModelName',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
   const firmwareVersionDeclare = declare(
     prefix + '.DeviceInfo.SoftwareVersion',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
   const hardwareVersionDeclare = declare(
     prefix + '.DeviceInfo.HardwareVersion',
     {value: 1},
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
@@ -1005,7 +1315,7 @@ function getMACAddress(): string | null {
   let mac: string | null = null;
   if (macFieldResponse.success && macFieldResponse.macField) {
     // Query and add the MAC address in Fargs
-    const macDeclare = declare(macFieldResponse.macField, {value: 1}, null) as {
+    const macDeclare = declare(macFieldResponse.macField, {value: 1}, {}) as {
       value?: [boolean | number | string, string];
     };
 
@@ -1031,17 +1341,15 @@ function getMACAddress(): string | null {
  * so it should not run again.
  */
 function init(): void {
-  if (state.sessionContext?.customScriptInfo?.initialized) return;
-
   let scriptInfo;
   try {
     scriptInfo = JSON.parse(context.args[1]);
-  } catch (error) {
+  } catch (error: unknown) {
     log('Failed to parse script info from arguments, using default values. ' +
-      `Error: ${error.message}, Arguments: ${context.args[1]}`, {});
+      `Error: ${(error as Error).message}, Arguments: ${context.args[1]}`, {});
     throw new Error(
       'Failed to parse script info from arguments: ' +
-      error.message
+      (error as Error).message
     );
   }
 
@@ -1056,7 +1364,7 @@ function init(): void {
   const tagValue = declare(
     'Tags.' + scriptTag,
     { value: SandboxDate.now(null, null) },
-    null,
+    {},
   ) as {
     value?: [boolean | number | string, string];
   };
@@ -1066,7 +1374,7 @@ function init(): void {
   ) throw SKIP;
 
   // Remove the script tag in Tags to avoid running again in debug mode
-  declare('Tags.' + scriptInfo?.scriptTag, null, {value: false});
+  declare('Tags.' + scriptInfo?.scriptTag, {}, {value: false});
 
   // Get the MAC address of the device
   const mac = getMACAddress();
@@ -1075,9 +1383,23 @@ function init(): void {
   if (!state.sessionContext.customScriptInfo)
     state.sessionContext.customScriptInfo = {};
 
+  state.sessionContext.customScriptInfo.executionCache ??=
+    new IterationMapCache();
+  state.sessionContext.customScriptInfo.messages ??= [];
+  state.sessionContext.customScriptInfo.auditMessages ??= [];
+  state.sessionContext.customScriptInfo.sentInfoToFlashman ??= false;
+
+  // Set the revision back to 0 in case this is a re-run of the script, so the
+  // script can use it to detect if it is the first run or a re-run
+  state.sessionContext.customScriptInfo.executionCache.resetRevision();
+
   state.sessionContext.customScriptInfo.isDebug = !!scriptInfo?.isDebug;
   state.sessionContext.customScriptInfo.scriptTag = scriptInfo?.scriptTag;
   state.sessionContext.customScriptInfo.mac = mac;
+
+  // Only ends the function here because we need to execute the previous steps
+  // in order to make genie understand the revisions
+  if (state.sessionContext?.customScriptInfo?.initialized) return;
 
   // Send the script initialization info to Flashman for monitoring
   sendScriptRunInfoToFlashman(scriptInfo.scriptTag, {started: true});
@@ -1192,15 +1514,37 @@ export async function run(
     status = 0;
     // Send a request to Flashman to inform that this script already finished
     // running
-    if (state.sessionContext?.customScriptInfo?.scriptTag) {
+    if (
+      state.sessionContext?.customScriptInfo?.scriptTag &&
+      !state.sessionContext?.customScriptInfo?.sentInfoToFlashman
+    ) {
+      // Send the audit logs to flashman
+      sendAuditLogs();
+
+      // Send the logs to flashman
+      sendFlashmanLogs();
+
+      // Inform flashman that the script ran
       sendScriptRunInfoToFlashman(
         state.sessionContext.customScriptInfo.scriptTag,
       );
+
+      state.sessionContext.customScriptInfo.messages = [];
+      state.sessionContext.customScriptInfo.auditMessages = [];
+      state.sessionContext.customScriptInfo.sentInfoToFlashman = true;
     }
   } catch (err) {
     if (err === COMMIT) {
+      // Clear the messages from old executions
+      if (state.sessionContext?.customScriptInfo?.messages)
+        state.sessionContext.customScriptInfo.messages = [];
+
       status = 1;
     } else if (err === EXT) {
+      // Clear the messages from old executions
+      if (state.sessionContext?.customScriptInfo?.messages)
+        state.sessionContext.customScriptInfo.messages = [];
+
       status = 2;
     } else if (err === SKIP) {
       // If we must skip this provision, just return
@@ -1214,10 +1558,24 @@ export async function run(
       };
     } else if (err === UPGRADE) {
       // Send a request to Flashman to inform that this script run the firmware
-      if (state.sessionContext?.customScriptInfo?.scriptTag) {
+      if (
+        state.sessionContext?.customScriptInfo?.scriptTag &&
+        !state.sessionContext?.customScriptInfo?.sentInfoToFlashman
+      ) {
+        // Send the audit logs to flashman
+        sendAuditLogs();
+
+        // Send the logs to flashman
+        sendFlashmanLogs();
+
+        // Inform flashman that the script ran
         sendScriptRunInfoToFlashman(
           state.sessionContext.customScriptInfo.scriptTag,
         );
+
+        state.sessionContext.customScriptInfo.messages = [];
+        state.sessionContext.customScriptInfo.auditMessages = [];
+        state.sessionContext.customScriptInfo.sentInfoToFlashman = true;
       }
       endTimer();
       return {
@@ -1230,11 +1588,25 @@ export async function run(
     } else {
       // For any other error, convert it to a fault and return it
       const fault = errorToFault(err);
-      if (state.sessionContext?.customScriptInfo?.scriptTag) {
+      if (
+        state.sessionContext?.customScriptInfo?.scriptTag &&
+        !state.sessionContext?.customScriptInfo?.sentInfoToFlashman
+      ) {
+        // Send the audit logs to flashman
+        sendAuditLogs();
+
+        // Send the logs to flashman
+        sendFlashmanLogs();
+
+        // Inform flashman that the script ran
         sendScriptRunInfoToFlashman(
           state.sessionContext.customScriptInfo.scriptTag,
           {fault},
         );
+
+        state.sessionContext.customScriptInfo.messages = [];
+        state.sessionContext.customScriptInfo.auditMessages = [];
+        state.sessionContext.customScriptInfo.sentInfoToFlashman = true;
       }
       return {
         fault: fault,
