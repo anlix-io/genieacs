@@ -1,7 +1,7 @@
 export const DeletedValue = Symbol('DeletedValue');
 export type Deleted = typeof DeletedValue;
 export type CachedPrimitive =
-  boolean | string | number | undefined | Deleted;
+  boolean | string | number | undefined | null | Deleted;
 export type CachedValue = CachedPrimitive | { [key: string]: CachedValue };
 export type CachedValues = { [key: string]: CachedValue };
 
@@ -30,7 +30,7 @@ export class IterationMapCache {
   private traversePath(
     path: string,
     revision?: CachedValues,
-  ): boolean | string | number | undefined | Deleted {
+  ): boolean | string | number | undefined | null | Deleted {
     // If there's no revision provided, nothing to read.
     if (!revision) return undefined;
 
@@ -77,7 +77,7 @@ export class IterationMapCache {
   public getValue(
     path: string,
     previousRevisionSearch = true,
-  ): boolean | string | number | undefined {
+  ): boolean | string | number | undefined | null {
     // If we only have to search in the latest revision, we can return early
     // without looping
     if (!previousRevisionSearch) {
@@ -114,7 +114,7 @@ export class IterationMapCache {
    */
   public saveValue(
     path: string,
-    value: boolean | string | number | Deleted,
+    value: boolean | string | number | null | Deleted,
   ): void {
     if (!this.valueCache[this.currentRevision])
       this.valueCache[this.currentRevision] = {};
@@ -179,7 +179,7 @@ export class IterationMapCache {
    */
   public getObjectTimestamp(
     path: string,
-  ): boolean | string | number | undefined {
+  ): boolean | string | number | undefined | null {
     return this.getValue(path + this.TIMESTAMP_OBJECT_SUFFIX, false);
   }
 
@@ -205,7 +205,7 @@ export class IterationMapCache {
    */
   public getAddObjectValue(
     path: string,
-  ): boolean | string | number | undefined {
+  ): boolean | string | number | undefined | null {
     this.incrementRevision();
     if (!path.endsWith('.')) path += '.';
 
@@ -229,7 +229,7 @@ export class IterationMapCache {
    */
   public getDeleteObjectValue(
     path: string,
-  ): boolean | string | number | undefined {
+  ): boolean | string | number | undefined | null {
     this.incrementRevision();
 
     // Get the last part of the path
@@ -260,7 +260,9 @@ export class IterationMapCache {
    *
    * @param path - The TR-069 parameter path to get the object size for.
    */
-  public getObjectSize(path: string): boolean | string | number | undefined {
+  public getObjectSize(
+    path: string,
+  ): boolean | string | number | undefined | null {
     // Get the last part of the path
     const lastPart = path
       .split('.')
@@ -283,7 +285,9 @@ export class IterationMapCache {
    * @returns The value of the setted value in the latest revision, or
    * undefined if not found.
    */
-  public getSettedValue(path: string): boolean | string | number | undefined {
+  public getSettedValue(
+    path: string,
+  ): boolean | string | number | undefined | null {
     this.incrementRevision();
     return this.getValue(path);
   }

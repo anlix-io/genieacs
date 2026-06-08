@@ -488,7 +488,7 @@ export function ferror(...args: any[]): void {
 /**
  * Send the logs to flashman all at once.
  */
-function sendFlashmanLogs(): void {
+export function sendFlashmanLogs(): void {
   // If there is no message to send or no script tag, return early
   if (
     !state.sessionContext.customScriptInfo?.scriptTag ||
@@ -563,7 +563,7 @@ function audit(
 /**
  * This function sends all the audit logs to Flashman
  */
-function sendAuditLogs(): void {
+export function sendAuditLogs(): void {
   // If there is no message to send or no script tag, return early
   if (
     !state.sessionContext.customScriptInfo?.scriptTag ||
@@ -743,7 +743,7 @@ export function getValue(path: string): boolean | number | string | undefined {
   // If we have this field in cache, return early
   const executionCache = state.sessionContext.customScriptInfo.executionCache;
   const cachedValue = executionCache.getValue(path);
-  if (cachedValue !== undefined) return cachedValue;
+  if (cachedValue !== undefined) return cachedValue ?? undefined;
 
   // Get the value
   declare(
@@ -1186,7 +1186,7 @@ export function updateFirmware(version: string): void {
  * @returns {Promise<void>} A promise that resolves when the request is
  * successful, or rejects with an error if the request fails.
  */
-function sendScriptRunInfoToFlashman(
+export function sendScriptRunInfoToFlashman(
   scriptTag: string,
   runInfo: {fault?: Fault, started?: boolean} = {},
 ): void {
