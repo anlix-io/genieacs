@@ -1035,7 +1035,7 @@ function runDeclarations(
 }
 
 function sendInfoToFlashman(
-  sessionContext: SessionContext,
+  sessionContext: SessionContext | undefined,
   fault: Fault
 ): void {
   if (
