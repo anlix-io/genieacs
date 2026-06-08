@@ -633,7 +633,7 @@ function getLastRevisionValueOrCommit(
   if (where === 'value') {
     const savedTime = executionCache.getObjectTimestamp(path);
 
-    // Save the timestamp to not execute in the same iteration
+    // Save the timestamp to not execute the same declare again
     executionCache.saveObjectTimestamp(
       path,
       SandboxDate.now(null, null),
