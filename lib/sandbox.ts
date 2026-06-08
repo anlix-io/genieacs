@@ -612,7 +612,7 @@ function sendAuditLogs(): void {
 function getLastRevisionValueOrCommit(
   path: string,
   where: 'value' | 'size' = 'value',
-): boolean | number | string | undefined {
+): boolean | number | string | undefined | null {
   // Read the value directly at the highest revision available instead of
   // relying on the ParameterWrapper getter (which reads at state.revision).
   //
@@ -643,8 +643,8 @@ function getLastRevisionValueOrCommit(
 
     // Only return the value if it has a timestamp and it's as new as possible
     if (
-      valueAttr != null && time && time >= SandboxDate.now(null, null)
-    ) return valueAttr[0] as boolean | number | string;
+      time && time >= SandboxDate.now(null, null)
+    ) return valueAttr[0] as boolean | number | string | undefined | null ;
   } else if (where === 'size') {
     // Get the size
     const parsedBasePath = Path.parse(path);
@@ -709,7 +709,8 @@ export function getValue(path: string): boolean | number | string | undefined {
 
   // If the path is not a string, return an error
   if (typeof path !== "string") {
-    ferror(`getValue() called with a non-string path: ${path}`);    throw new Error("getValue() called with a non-string path");
+    ferror(`getValue() called with a non-string path: ${path}`);
+    throw new Error("getValue() called with a non-string path");
   }
 
   // Trim whitespace from the path
@@ -751,13 +752,13 @@ export function getValue(path: string): boolean | number | string | undefined {
     {},
   );
 
-  // Try getting the parameter
+  // Try getting the parameter, it might throw
   const parameter = getLastRevisionValueOrCommit(path);
 
   // Save the value to next iterations
-  if (parameter !== UNDEFINED) executionCache.saveValue(path, parameter);
+  executionCache.saveValue(path, parameter ?? null);
 
-  return parameter;
+  return parameter ?? undefined;
 }
 
 /**
