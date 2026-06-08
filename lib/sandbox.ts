@@ -630,21 +630,32 @@ function getLastRevisionValueOrCommit(
   const parsedPath = Path.parse(path);
   const deviceData = state.sessionContext.deviceData;
   const unpacked = device.unpack(deviceData, parsedPath, readRevision);
-  if (unpacked.length && where === 'value') {
-    const attrs = deviceData.attributes.get(unpacked[0], readRevision);
-    const valueAttr = attrs?.value?.[1];
-    const time = attrs?.value?.[0] ?? executionCache.getObjectTimestamp(path);
+  if (where === 'value') {
+    const savedTime = executionCache.getObjectTimestamp(path);
 
-    // Save the timestamp
+    // Save the timestamp to not execute in the same iteration
     executionCache.saveObjectTimestamp(
       path,
-      time ?? SandboxDate.now(null, null),
+      SandboxDate.now(null, null),
     );
 
-    // Only return the value if it has a timestamp and it's as new as possible
-    if (
-      time && time >= SandboxDate.now(null, null)
-    ) return valueAttr[0] as boolean | number | string | undefined | null ;
+    // If we have the parameter, return only if it is as new as possible
+    if (unpacked.length) {
+      const attrs = deviceData.attributes.get(unpacked[0], readRevision);
+      const valueAttr = attrs?.value?.[1];
+      const time = attrs?.value?.[0] ?? savedTime;
+
+      // Only return the value if it has a timestamp and it's as new as possible
+      if (
+        time && time >= SandboxDate.now(null, null)
+      ) return valueAttr?.[0] as boolean | number | string | undefined | null;
+    } else if (savedTime && savedTime >= SandboxDate.now(null, null)) {
+      // If we don't have the parameter but we have a timestamp for it, return
+      // null
+      // This might be the case where the parameter doesn't exist in the TR-069
+      // tree
+      return null;
+    }
   } else if (where === 'size') {
     // Get the size
     const parsedBasePath = Path.parse(path);
@@ -679,7 +690,7 @@ function getLastRevisionValueOrCommit(
     );
 
     if (savedTime && time && time >= SandboxDate.now(null, null)) return size;
-  }    
+  }
 
   // The value isn't in deviceData yet. Force genieacs to fetch the
   // parameter and re-run the script on the next iteration by throwing
