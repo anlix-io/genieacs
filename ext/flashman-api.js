@@ -745,8 +745,18 @@ let cacheSendCustomScriptEventDATA = {};
  * @return {void} It doesn't return anything as it is not needed
  */
 async function sendCustomScriptEvent(args, callback) {
-  const params = JSON.parse(args[0]);
+  let params;
   const callidx = args[1];
+
+  try {
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    cacheSendCustomScriptEventDATA = {
+      success: false,
+      message: 'Invalid JSON in sendCustomScriptEvent',
+    };
+    return callback(null, cacheSendCustomScriptEventDATA);
+  }
 
   // Avoid call to flashman twice from provision
   if (cacheSendCustomScriptEventIDX === callidx) {
@@ -785,8 +795,18 @@ let cacheSendCustomScriptExecutionRequestDATA = {};
  * @return {void} It doesn't return anything as it is not needed
  */
 async function sendCustomScriptExecutionRequest(args, callback) {
-  const params = JSON.parse(args[0]);
+  let params;
   const callidx = args[1];
+
+  try {
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    cacheSendCustomScriptExecutionRequestDATA = {
+      success: false,
+      message: 'Invalid JSON in sendCustomScriptExecutionRequest',
+    };
+    return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
 
   // Avoid call to flashman twice from provision
   if (cacheSendCustomScriptExecutionRequestIDX === callidx) {

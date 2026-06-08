@@ -186,14 +186,14 @@ export interface SessionContext {
     lastMessageId?: number;
     messages: {
       id: number;
-      timestamp: number;
-      content: string;
+      timestamp: string;
+      message: string;
       type: 'error' | 'log';
     }[];
     lastAuditMessageId?: number;
     auditMessages: {
       id: number;
-      timestamp: number;
+      timestamp: string;
       actionType: ActionType;
       path: string;
       value?: any;

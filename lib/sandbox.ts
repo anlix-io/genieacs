@@ -1163,7 +1163,13 @@ export function updateFirmware(version: string): void {
 
   // Force committing the changes
   state.revision = state.maxRevision;
-  commit();
+
+  // Catch and throw UPGRADE to end the provision
+  try {
+    commit();
+  } catch (_error) {
+    throw UPGRADE;
+  }
 
   throw UPGRADE;
 }
@@ -1362,14 +1368,14 @@ function init(): void {
   const mac = getMACAddress();
 
   // Set the debug mode, tag and initilization flag
-  if (!state.sessionContext.customScriptInfo) {
-    state.sessionContext.customScriptInfo = {
-      executionCache: new IterationMapCache(),
-      messages: [],
-      auditMessages: [],
-      sentInfoToFlashman: false,
-    };
-  }
+  if (!state.sessionContext.customScriptInfo)
+    state.sessionContext.customScriptInfo = {};
+
+  state.sessionContext.customScriptInfo.executionCache ??=
+    new IterationMapCache();
+  state.sessionContext.customScriptInfo.messages ??= [];
+  state.sessionContext.customScriptInfo.auditMessages ??= [];
+  state.sessionContext.customScriptInfo.sentInfoToFlashman ??= false;
 
   // Set the revision back to 0 in case this is a re-run of the script, so the
   // script can use it to detect if it is the first run or a re-run
