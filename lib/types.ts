@@ -23,6 +23,7 @@ import VersionedMap from "./versioned-map";
 import InstanceSet from "./instance-set";
 import { IncomingMessage, ServerResponse } from "http";
 import { Script } from "vm";
+import { IterationMapCache } from "./iteration-map";
 
 export type Expression = string | number | boolean | null | any[];
 
@@ -126,6 +127,12 @@ export interface SyncState {
   factoryReset: number;
 }
 
+export enum ActionType {
+  ADD_OBJECT = "addObject",
+  DELETE_OBJECT = "deleteObject",
+  SET_VALUE = "setValue",
+}
+
 export interface SessionContext {
   sessionId?: string;
   timestamp: number;
@@ -176,6 +183,23 @@ export interface SessionContext {
     isDebug?: boolean;
     scriptTag?: string;
     mac?: string;
+    lastMessageId?: number;
+    messages: {
+      id: number;
+      timestamp: string;
+      message: string;
+      type: 'error' | 'log';
+    }[];
+    lastAuditMessageId?: number;
+    auditMessages: {
+      id: number;
+      timestamp: string;
+      actionType: ActionType;
+      path: string;
+      value?: any;
+    }[];
+    sentInfoToFlashman: boolean;
+    executionCache: IterationMapCache;
   };
 }
 
