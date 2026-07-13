@@ -1,3 +1,4 @@
+
 import * as device from "./device.ts";
 import * as sandbox from "./sandbox.ts";
 import * as localCache from "./cwmp/local-cache.ts";
@@ -7,6 +8,7 @@ import Path from "./common/path.ts";
 import PathSet from "./common/path-set.ts";
 import VersionedMap from "./versioned-map.ts";
 import InstanceSet from "./instance-set.ts";
+
 import {
   Attributes,
   SessionContext,
@@ -53,7 +55,7 @@ const VALID_PARAM_TYPES = new Set([
   "xsd:hexBinary",
 ]);
 
-function initDeviceData(): DeviceData {
+export function initDeviceData(): DeviceData {
   return {
     paths: new PathSet(),
     timestamps: new VersionedMap(),
@@ -1016,6 +1018,32 @@ function runDeclarations(
   );
 }
 
+function sendInfoToFlashman(
+  sessionContext: SessionContext | undefined,
+  fault: Fault
+): void {
+  if (
+    sessionContext?.customScriptInfo?.scriptTag &&
+    !sessionContext?.customScriptInfo?.sentInfoToFlashman
+  ) {
+    // Send the audit logs to flashman
+    sandbox.sendAuditLogs();
+
+    // Send the logs to flashman
+    sandbox.sendFlashmanLogs();
+
+    // Inform flashman that the script ran
+    sandbox.sendScriptRunInfoToFlashman(
+      sessionContext.customScriptInfo.scriptTag,
+      { fault },
+    );
+
+    sessionContext.customScriptInfo.messages = [];
+    sessionContext.customScriptInfo.auditMessages = [];
+    sessionContext.customScriptInfo.sentInfoToFlashman = true;
+  }
+}
+
 export async function rpcRequest(
   sessionContext: SessionContext,
   _declarations: Declaration[]
@@ -1115,37 +1143,51 @@ export async function rpcRequest(
   }
 
   if (sessionContext.rpcCount >= 255) {
+    const fault: Fault = {
+      code: "too_many_rpcs",
+      message: "Too many RPC requests",
+      timestamp: sessionContext.timestamp,
+    };
+
+    // Send the logs to flashman if there are any
+    sendInfoToFlashman(sessionContext, fault);
     return {
-      fault: {
-        code: "too_many_rpcs",
-        message: "Too many RPC requests",
-        timestamp: sessionContext.timestamp,
-      },
+      fault,
       rpcId: null,
       rpc: null,
     };
   }
 
   if (sessionContext.revisions.length >= 8) {
+    const fault: Fault = {
+      code: "deeply_nested_vparams",
+      message:
+        "Virtual parameters are referencing other virtual parameters in a deeply nested manner",
+      timestamp: sessionContext.timestamp,
+    };
+
+    // Send the logs to flashman if there are any
+    sendInfoToFlashman(sessionContext, fault);
+
     return {
-      fault: {
-        code: "deeply_nested_vparams",
-        message:
-          "Virtual parameters are referencing other virtual parameters in a deeply nested manner",
-        timestamp: sessionContext.timestamp,
-      },
+      fault,
       rpcId: null,
       rpc: null,
     };
   }
 
   if (sessionContext.cycle >= 255) {
+    const fault: Fault = {
+      code: "too_many_cycles",
+      message: "Too many provision cycles",
+      timestamp: sessionContext.timestamp,
+    };
+
+    // Send the logs to flashman if there are any
+    sendInfoToFlashman(sessionContext, fault);
+
     return {
-      fault: {
-        code: "too_many_cycles",
-        message: "Too many provision cycles",
-        timestamp: sessionContext.timestamp,
-      },
+      fault,
       rpcId: null,
       rpc: null,
     };
@@ -1163,12 +1205,17 @@ export async function rpcRequest(
     ) * 2;
 
   if (sessionContext.iteration >= MAX_ITERATIONS * (sessionContext.cycle + 1)) {
+    const fault: Fault = {
+      code: "too_many_commits",
+      message: "Too many commit iterations",
+      timestamp: sessionContext.timestamp,
+    };
+
+    // Send the logs to flashman if there are any
+    sendInfoToFlashman(sessionContext, fault);
+
     return {
-      fault: {
-        code: "too_many_commits",
-        message: "Too many commit iterations",
-        timestamp: sessionContext.timestamp,
-      },
+      fault,
       rpcId: null,
       rpc: null,
     };

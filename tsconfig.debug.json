@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "outDir": "./debug_dist",
+    "rootDir": "./",
+    "module": "commonjs",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "sourceMap": true,
+    "declaration": true,
+    "removeComments": false
+  },
+  "include": [
+    "./bin/*.ts",
+    "./lib/**/*",
+    "./ui/**/*",
+    "./test/**/*",
+    "./build/**/*"
+  ]
+}

@@ -54,7 +54,6 @@ import * as debug from "./debug.ts";
 import { getRequestOrigin } from "./forwarded.ts";
 import { getSocketEndpoints } from "./server.ts";
 import { metricsExporter } from "./metrics.ts";
-import { sendFlashmanInformRequest } from "./flashman.ts";
 import * as redisClient from './redis.ts'
 
 const gzipPromisified = promisify(zlib.gzip);
@@ -64,7 +63,6 @@ const REALM = "GenieACS";
 const MAX_CYCLES = 4;
 const MAX_CONCURRENT_REQUESTS = +config.get("MAX_CONCURRENT_REQUESTS");
 const PROMETHEUS_METRICS = config.get("CWMP_PROMETHEUS_METRICS");
-const SKIP_FLASHMAN_INFORM = config.get("SKIP_FLASHMAN_INFORM");
 const BLOCK_NEW_CPE = config.get("BLOCK_NEW_CPE");
 const MODELS_BLACKLIST = config.get("MODELS_BLACKLIST");
 
@@ -82,7 +80,7 @@ const stats = {
 };
 
 let deviceIdsToCaptureXml = new Set<string>();
-let capturedXmlBodies = new Map();
+const capturedXmlBodies = new Map();
 
 function reevalutedeviceIdsToCaptureXml(): void {
   if (!redisClient.online()) return;
@@ -102,35 +100,41 @@ async function authenticate(
   sessionContext: SessionContext,
   body: string
 ): Promise<boolean> {
-  const authExpression: Expression = localCache.getConfigExpression(
-    sessionContext.cacheSnapshot,
-    "cwmp.auth"
-  );
-  if (authExpression == null) return true;
-
-  let authentication;
-
-  if (sessionContext.httpRequest.headers["authorization"]) {
-    try {
-      authentication = auth.parseAuthorizationHeader(
-        sessionContext.httpRequest.headers["authorization"]
-      );
-    } catch (err) {
-      return false;
-    }
+  let authExpression: Expression|undefined;
+  if(sessionContext.cacheSnapshot) {
+    authExpression = localCache.getConfigExpression(
+      sessionContext.cacheSnapshot,
+      "cwmp.auth"
+    );
   }
 
-  if (authentication?.method === "Digest") {
-    const sessionNonce = sessionsNonces.get(sessionContext.httpRequest.socket);
+  if (authExpression == null) return true;
 
-    if (
-      !sessionNonce ||
-      authentication.nonce !== sessionNonce ||
-      (authentication.qop && (!authentication.cnonce || !authentication.nc))
-    )
-      return false;
+  let authentication:any|undefined;
 
-    authentication["body"] = body;
+  if(sessionContext.httpRequest) {
+    if (sessionContext.httpRequest.headers["authorization"]) {
+      try {
+        authentication = auth.parseAuthorizationHeader(
+          sessionContext.httpRequest.headers["authorization"]
+        );
+      } catch (err) {
+        return false;
+      }
+    }
+
+    if (authentication?.method === "Digest") {
+      const sessionNonce = sessionsNonces.get(sessionContext.httpRequest.socket);
+
+      if (
+        !sessionNonce ||
+        authentication.nonce !== sessionNonce ||
+        (authentication.qop && (!authentication.cnonce || !authentication.nc))
+      )
+        return false;
+
+      authentication["body"] = body;
+    }
   }
 
   const res = await evaluateAsync(
@@ -1737,35 +1741,6 @@ async function listenerAsync(
       httpResponse.end("403 Forbidden");
       metricsExporter.blockedNewCpe.inc();
       return;
-    }
-  }
-
-  if (SKIP_FLASHMAN_INFORM && parameters) {
-    const periodicOnly =
-      rpc.cpeRequest != null &&
-      rpc.cpeRequest.event.length === 1 &&
-      rpc.cpeRequest.event[0] === "2 PERIODIC";
-    if (periodicOnly) {
-      const flashmanResponse = await sendFlashmanInformRequest(
-        rpc,
-        parameters
-      ).catch((reason) => {
-        logger.error({
-          message: reason,
-        });
-        return {
-          success: false,
-          measure: false,
-        };
-      });
-      if (flashmanResponse.success && !flashmanResponse.measure) {
-        _sessionContext.skipProvision = true;
-        logger.accessInfo({
-          sessionContext: _sessionContext,
-          message: "Skipping flashman provision",
-          rpc: rpc,
-        });
-      }
     }
   }
 

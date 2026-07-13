@@ -1,9 +1,29 @@
+/**
+ * Copyright 2013-2019  GenieACS Inc.
+ *
+ * This file is part of GenieACS.
+ *
+ * GenieACS is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU Affero General Public License as
+ * published by the Free Software Foundation, either version 3 of the
+ * License, or (at your option) any later version.
+ *
+ * GenieACS is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU Affero General Public License for more details.
+ *
+ * You should have received a copy of the GNU Affero General Public License
+ * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+import Path from "./common/path";
+import PathSet from "./common/path-set";
+import VersionedMap from "./versioned-map";
+import InstanceSet from "./instance-set";
 import { IncomingMessage, ServerResponse } from "node:http";
 import { Script } from "node:vm";
-import Path from "./common/path.ts";
-import PathSet from "./common/path-set.ts";
-import VersionedMap from "./versioned-map.ts";
-import InstanceSet from "./instance-set.ts";
+import { IterationMapCache } from "./iteration-map";
 
 export type Expression = string | number | boolean | null | any[];
 
@@ -107,6 +127,12 @@ export interface SyncState {
   factoryReset: number;
 }
 
+export enum ActionType {
+  ADD_OBJECT = "addObject",
+  DELETE_OBJECT = "deleteObject",
+  SET_VALUE = "setValue",
+}
+
 export interface SessionContext {
   sessionId?: string;
   timestamp: number;
@@ -151,6 +177,29 @@ export interface SessionContext {
   provisionsRet?: any[];
   doneTasks?: string[];
   needCookieOnEveryTask?: boolean;
+  customScriptInfo?: {
+    initialized?: boolean;
+    isDebug?: boolean;
+    scriptTag?: string;
+    mac?: string;
+    lastMessageId?: number;
+    messages: {
+      id: number;
+      timestamp: string;
+      message: string;
+      type: 'error' | 'log';
+    }[];
+    lastAuditMessageId?: number;
+    auditMessages: {
+      id: number;
+      timestamp: string;
+      actionType: ActionType;
+      path: string;
+      value?: any;
+    }[];
+    sentInfoToFlashman: boolean;
+    executionCache: IterationMapCache;
+  };
 }
 
 export interface Task {

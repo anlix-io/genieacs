@@ -82,12 +82,58 @@ const getDeviceFields = async function(args, callback) {
     forceUpdate: flashRes.data.forceUpdate,
     bootstrapCheckValue: flashRes.data.bootstrapCheckValue,
     permissions: flashRes.data.permissions,
+    doSyncIfNoBootstrap: flashRes.data.doSyncIfNoBootstrap,
     shouldRunRegularProvision: flashRes.data.shouldRunRegularProvision,
     shouldRunBootstrapSync: flashRes.data.shouldRunBootstrapSync,
     executeConfigFile: flashRes.data.executeConfigFile,
     configFilename: flashRes.data.configFilename,
   };
   callback(null, cacheDeviceFieldsDATA);
+};
+
+let doFlashmanSyncIDX = '';
+let doFlashmanSyncDATA = {};
+const doFlashmanSync = async function(args, callback) {
+  let params = null;
+  let callidx = 0;
+
+  // If callback not defined, define a simple one
+  if (!callback) {
+    callback = (arg1, arg2) => {
+      return arg2;
+    };
+  }
+
+  try {
+    callidx = args[1];
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    return callback(null, {
+      success: false,
+      message: 'Error parsing params JSON',
+      reason: 'params-json-parse',
+    });
+  }
+
+  // Avoid call to flashman twice from provision
+  if (doFlashmanSyncIDX === callidx) {
+    return callback(null, doFlashmanSyncDATA);
+  }
+
+  if (!params || !params.acs_id) {
+    doFlashmanSyncIDX = callidx;
+    doFlashmanSyncDATA = {
+      success: false,
+      message: 'Incomplete arguments',
+      reason: 'incomplete-params',
+    };
+    return callback(null, doFlashmanSyncDATA);
+  }
+
+  let flashRes = await sendFlashmanRequest('POST', 'device/boot-syn', params);
+  doFlashmanSyncIDX = callidx;
+  doFlashmanSyncDATA = flashRes;
+  callback(null, doFlashmanSyncDATA);
 };
 
 
@@ -130,12 +176,12 @@ const getDeviceModelFields = async function(args, callback) {
 
   const fieldsResult = await sendFlashmanRequest(
     'GET',
-    `oui/${params.oui}/` +
-    `model/${params.model}/` +
-    `model-name/${params.modelName}/` +
-    `hardware/${params.hardwareVersion}/` +
-    `firmware/${params.firmwareVersion}/` +
-    `tr-type/${params.trType}/` +
+    `oui/${encodeURIComponent(params.oui)}/` +
+    `model/${encodeURIComponent(params.model)}/` +
+    `model-name/${encodeURIComponent(params.modelName)}/` +
+    `hardware/${encodeURIComponent(params.hardwareVersion)}/` +
+    `firmware/${encodeURIComponent(params.firmwareVersion)}/` +
+    `tr-type/${encodeURIComponent(params.trType)}/` +
     'model-fields',
     {},
   );
@@ -343,6 +389,9 @@ const sendFlashmanRequest = function(method, route, params, shareLoad=true) {
       url: url + route,
       method: method,
       json: params,
+      headers: {
+        'X-Anlix-Sec': process.env.FLM_COMPANY_SECRET,
+      },
     },
     function(error, response, body) {
       if (error) {
@@ -448,13 +497,13 @@ const deleteTaskCallbacks = async function(args, callback) {
       success: false,
       message: 'Incomplete arguments',
     };
-    return callback(null, cacheSyncDeviceDATA);
+    return callback(null, cacheDeleteTaskCallbackDATA);
   }
 
   // Send an empty body because request is dumb and won't interpret result body
   // as json unless you sent a json yourself
   let result = await sendFlashmanRequest(
-    'DELETE', `device/${params.acs_id}/taskCallbacks`, {},
+    'DELETE', `device/${encodeURIComponent(params.acs_id)}/taskCallbacks`, {},
   );
   cacheDeleteTaskCallbackIDX = callidx;
   cacheDeleteTaskCallbackDATA = result;
@@ -481,11 +530,11 @@ const getMultiLanProvision = async function(args, callback) {
 
   const result = await sendFlashmanRequest(
     'GET',
-    `model/${routerid.model}/` +
-    `model-name/${routerid.modelName}/` +
-    `hardware/${routerid.hardwareVersion}/` +
-    `firmware/${routerid.firmwareVersion}/` +
-    `tr-type/${routerid.trType}/` +
+    `model/${encodeURIComponent(routerid.model)}/` +
+    `model-name/${encodeURIComponent(routerid.modelName)}/` +
+    `hardware/${encodeURIComponent(routerid.hardwareVersion)}/` +
+    `firmware/${encodeURIComponent(routerid.firmwareVersion)}/` +
+    `tr-type/${encodeURIComponent(routerid.trType)}/` +
     'lan-index',
     {
       requests: params.requests,
@@ -516,7 +565,7 @@ const getChosenWan = async function(args, callback) {
 
   const result = await sendFlashmanRequest(
     'GET',
-    `acs-id/${acsID}/wan-chosen`,
+    `acs-id/${encodeURIComponent(acsID)}/wan-chosen`,
     {},
   );
 
@@ -525,11 +574,264 @@ const getChosenWan = async function(args, callback) {
     wanChosenPath = result.data.wanChosenPath;
   }
 
-  cacheGetMultiLanProvisionIDX = callidx;
-  cacheGetMultiLanProvisionDATA = {wanChosenPath};
+  cacheGetChosenWanIDX = callidx;
+  cacheGetChosenWanDATA = {wanChosenPath};
   callback(null, {wanChosenPath});
 };
 
+let cacheGetMACFieldIDX = '';
+let cacheGetMACFieldDATA = {};
+/**
+ * Calls Flashman to get the MAC field of a device.
+ *
+ * @param {array<object|string>} args - Array of objects with the arguments.
+ * @param {function|undefined} callback - Callback function.
+ *
+ * @return {any} - The result of the callback called with the result of what
+ * Flashman returns after the call or an object with success and message.
+ */
+const getMACField = async function(args, callback) {
+  let params;
+  let callidx = 0;
+
+  // If callback not defined, define a simple one
+  if (!callback) {
+    callback = (_arg1, arg2) => {
+      return arg2;
+    };
+  }
+
+  // Try to parse the arguments
+  try {
+    params = JSON.parse(args[0]);
+    callidx = args[1];
+  } catch (error) {
+    const toReturn = {
+      success: false,
+      message: 'Invalid JSON',
+    };
+    return callback(null, toReturn);
+  }
+
+  // Avoid call to flashman twice from provision, check if data is valid
+  if (
+    cacheGetMACFieldIDX === callidx &&
+    cacheGetMACFieldDATA &&
+    cacheGetMACFieldDATA.message
+  ) {
+    return callback(null, cacheGetMACFieldDATA);
+  }
+
+  // Check if params is valid
+  if (!params || !params.oui || !params.model) {
+    const toReturn = {
+      success: false,
+      message: 'Incomplete arguments',
+    };
+    return callback(null, toReturn);
+  }
+
+  // Call Flashman
+  let response = await sendFlashmanRequest(
+    'GET', 'device/mac', params,
+  );
+
+  if (!response || !response.data) {
+    cacheGetMACFieldIDX = callidx;
+    cacheGetMACFieldDATA = {
+      success: false,
+      message: 'Error contacting Flashman',
+      macField: null,
+    };
+    return callback(null, cacheGetMACFieldDATA);
+  }
+
+  cacheGetMACFieldIDX = callidx;
+  cacheGetMACFieldDATA = {
+    success: true,
+    message: 'OK',
+    macField: response.data.macField,
+  };
+  return callback(null, cacheGetMACFieldDATA);
+};
+
+let cacheGetFirmwareFileIDX = '';
+let cacheGetFirmwareFileDATA = {};
+/**
+ * Calls Flashman to get the firmware name of a device.
+ *
+ * @param {array<object|string>} args - Array of objects with the arguments.
+ * @param {function|undefined} callback - Callback function.
+ *
+ * @return {any} - The result of the callback called with the result of what
+ * Flashman returns after the call or an object with success and message.
+ */
+const getFirmwareFile = async function(args, callback) {
+  let params;
+  let callidx = 0;
+
+  // If callback not defined, define a simple one
+  if (!callback) {
+    callback = (_arg1, arg2) => {
+      return arg2;
+    };
+  }
+
+  // Try to parse the arguments
+  try {
+    params = JSON.parse(args[0]);
+    callidx = args[1];
+  } catch (error) {
+    const toReturn = {
+      success: false,
+      message: 'Invalid JSON',
+    };
+    return callback(null, toReturn);
+  }
+
+  // Avoid call to flashman twice from provision, check if data is valid
+  if (
+    cacheGetFirmwareFileIDX === callidx &&
+    cacheGetFirmwareFileDATA &&
+    cacheGetFirmwareFileDATA.message
+  ) {
+    return callback(null, cacheGetFirmwareFileDATA);
+  }
+
+  // Check if params is valid
+  if (!params || !params.productClass || !params.version || !params.acsId) {
+    const toReturn = {
+      success: false,
+      message: 'Incomplete arguments',
+    };
+    return callback(null, toReturn);
+  }
+
+  // Call Flashman
+  let response = await sendFlashmanRequest(
+    'GET',
+    `product-class/${encodeURIComponent(params.productClass)}/version/` +
+      `${encodeURIComponent(params.version)}/firmware`,
+    {},
+  );
+
+  if (!response || !response.data) {
+    cacheGetFirmwareFileIDX = callidx;
+    cacheGetFirmwareFileDATA = {
+      success: false,
+      message: 'Error contacting Flashman',
+      filename: null,
+    };
+    return callback(null, cacheGetFirmwareFileDATA);
+  }
+
+  cacheGetFirmwareFileIDX = callidx;
+  cacheGetFirmwareFileDATA = {
+    success: true,
+    message: 'OK',
+    filename: response.data.filename,
+  };
+  return callback(null, cacheGetFirmwareFileDATA);
+};
+
+let cacheSendCustomScriptEventIDX = '';
+let cacheSendCustomScriptEventDATA = {};
+/**
+ * Calls Flashman to register a custom script event for a device.
+ *
+ * @param {array<object|string>} args - Array of objects with the arguments.
+ * @param {function|undefined} callback - Callback function.
+ *
+ * @return {void} It doesn't return anything as it is not needed
+ */
+async function sendCustomScriptEvent(args, callback) {
+  let params;
+  const callidx = args[1];
+
+  try {
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    cacheSendCustomScriptEventDATA = {
+      success: false,
+      message: 'Invalid JSON in sendCustomScriptEvent',
+    };
+    return callback(null, cacheSendCustomScriptEventDATA);
+  }
+
+  // Avoid call to flashman twice from provision
+  if (cacheSendCustomScriptEventIDX === callidx) {
+    return callback(null, cacheSendCustomScriptEventDATA);
+  }
+
+  // Validate input
+  if (!params || !params.acsId || !params.event) {
+    cacheSendCustomScriptEventIDX = callidx;
+    cacheSendCustomScriptEventDATA = {
+      success: false,
+      message: 'Incomplete arguments in sendCustomScriptEvent',
+    };
+    return callback(null, cacheSendCustomScriptEventDATA);
+  }
+
+  // Send the request to Flashman
+  const url = `acs-id/${encodeURIComponent(params.acsId)}/script` +
+    `/event/${encodeURIComponent(params.event)}`;
+  const result = await sendFlashmanRequest('POST', url, params);
+
+  // Save the result in cache and return it
+  cacheSendCustomScriptEventIDX = callidx;
+  cacheSendCustomScriptEventDATA = result;
+  return callback(null, cacheSendCustomScriptEventDATA);
+}
+
+let cacheSendCustomScriptExecutionRequestIDX = '';
+let cacheSendCustomScriptExecutionRequestDATA = {};
+/**
+ * Calls Flashman to register a custom script execution request for a device.
+ *
+ * @param {array<object|string>} args - Array of objects with the arguments.
+ * @param {function|undefined} callback - Callback function.
+ *
+ * @return {void} It doesn't return anything as it is not needed
+ */
+async function sendCustomScriptExecutionRequest(args, callback) {
+  let params;
+  const callidx = args[1];
+
+  try {
+    params = JSON.parse(args[0]);
+  } catch (error) {
+    cacheSendCustomScriptExecutionRequestDATA = {
+      success: false,
+      message: 'Invalid JSON in sendCustomScriptExecutionRequest',
+    };
+    return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
+
+  // Avoid call to flashman twice from provision
+  if (cacheSendCustomScriptExecutionRequestIDX === callidx) {
+    return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
+
+  // Validate input
+  if (!params || !params.acsId || !params.mac) {
+    cacheSendCustomScriptExecutionRequestIDX = callidx;
+    cacheSendCustomScriptExecutionRequestDATA = {
+      success: false,
+      message: 'Incomplete arguments in sendCustomScriptExecutionRequest',
+    };
+    return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
+
+  // Send the request to Flashman
+  const url = `acs-id/${encodeURIComponent(params.acsId)}/script/initiate`;
+  const result = await sendFlashmanRequest('POST', url, params);
+
+  // Save the result in cache and return it
+  cacheSendCustomScriptExecutionRequestIDX = callidx;
+  cacheSendCustomScriptExecutionRequestDATA = result;
+  return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+}
 
 /**
  * @exports controllers/external-genieacs/devices-api
@@ -542,6 +844,11 @@ exports.checkNeedConfigurationFile = checkNeedConfigurationFile;
 exports.checkNeedConfigurationFileOnWAN = checkNeedConfigurationFileOnWAN;
 exports.deleteTaskCallbacks = deleteTaskCallbacks;
 exports.getDeviceFields = getDeviceFields;
+exports.doFlashmanSync = doFlashmanSync;
 exports.syncDeviceData = syncDeviceData;
 exports.syncDeviceDiagnostics = syncDeviceDiagnostics;
 exports.getChosenWan = getChosenWan;
+exports.getMACField = getMACField;
+exports.getFirmwareFile = getFirmwareFile;
+exports.sendCustomScriptEvent = sendCustomScriptEvent;
+exports.sendCustomScriptExecutionRequest = sendCustomScriptExecutionRequest;

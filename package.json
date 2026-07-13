@@ -1,6 +1,6 @@
 {
   "name": "genieacs",
-  "version": "1.2.13",
+  "version": "1.4.0",
   "description": "A TR-069 Auto Configuration Server (ACS)",
   "repository": {
     "type": "git",
@@ -74,6 +74,7 @@
   "scripts": {
     "test": "esbuild --log-level=warning --bundle --platform=node --target=node18 --packages=external --sourcemap=inline --outdir=test test/*.ts && node --test --enable-source-maps test/*.js && rm test/*.js",
     "lint": "esbuild build/lint.ts --bundle --platform=node --target=node16 --packages=external | node",
-    "build": "esbuild build/build.ts --bundle --platform=node --target=node12 --packages=external | node"
+    "build": "esbuild build/build.ts --bundle --platform=node --target=node12 --packages=external | node",
+    "debug-build": "tsc --project tsconfig.debug.json"
   }
 }
