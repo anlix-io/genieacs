@@ -1,65 +1,60 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-import * as promClient from 'prom-client'
-import * as zlib from "zlib";
-import * as url from 'url';
-import * as crypto from "crypto";
-import { Socket } from "net";
-import * as auth from "./auth";
-import * as config from "./config";
-import * as common from "./common";
-import * as soap from "./soap";
-import * as session from "./session";
-import { evaluateAsync, evaluate, extractParams } from "./common/expression";
-import * as cache from "./cache";
-import * as localCache from "./local-cache";
-import * as db from "./db";
-import * as redis from "./redis"
-import * as logger from "./logger";
-import * as scheduling from "./scheduling";
-import Path from "./common/path";
-import * as extensions from "./extensions";
+import * as promClient from "prom-client";
+import * as zlib from "node:zlib";
+import * as url from 'node:url';
+import * as crypto from "node:crypto";
+import { Socket } from "node:net";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { pipeline, Readable } from "node:stream";
+import { promisify } from "node:util";
+import { decode, encodingExists } from "iconv-lite";
+import * as auth from "./auth.ts";
+import * as config from "./config.ts";
+import { generateDeviceId, once, setTimeoutPromise } from "./util.ts";
+import * as soap from "./soap.ts";
+import * as session from "./session.ts";
+import {
+  evaluateAsync,
+  evaluate,
+  extractParams,
+} from "./common/expression/util.ts";
+import * as cache from "./cache.ts";
+import * as redis from "./redis.ts";
+import * as lock from "./lock.ts";
+import * as localCache from "./cwmp/local-cache.ts";
+import {
+  clearTasks,
+  deleteFault,
+  deleteOperation,
+  fetchDevice,
+  getDueTasks,
+  getFaults,
+  getOperations,
+  saveDevice,
+  saveFault,
+  saveOperation,
+} from "./cwmp/db.ts";
+import * as logger from "./logger.ts";
+import * as scheduling from "./scheduling.ts";
+import Path from "./common/path.ts";
+import * as extensions from "./extensions.ts";
 import {
   SessionContext,
   AcsRequest,
   SessionFault,
-  Operation,
   Fault,
   Expression,
-  Task,
   SoapMessage,
   InformRequest,
   Preset,
   GetRPCMethodsResponse,
   CpeFault,
-} from "./types";
-import { IncomingMessage, ServerResponse } from "http";
-import { pipeline, Readable } from "stream";
-import { promisify } from "util";
-import { decode, encodingExists } from "iconv-lite";
-import { parseXmlDeclaration } from "./xml-parser";
-import * as debug from "./debug";
-import { getRequestOrigin } from "./forwarded";
-import { getSocketEndpoints } from "./server";
-import { metricsExporter } from "./metrics";
-import * as redisClient from './redis'
+} from "./types.ts";
+import { parseXmlDeclaration } from "./xml-parser.ts";
+import * as debug from "./debug.ts";
+import { getRequestOrigin } from "./forwarded.ts";
+import { getSocketEndpoints } from "./server.ts";
+import { metricsExporter } from "./metrics.ts";
+import * as redisClient from './redis.ts'
 
 const gzipPromisified = promisify(zlib.gzip);
 const deflatePromisified = promisify(zlib.deflate);
@@ -71,13 +66,17 @@ const PROMETHEUS_METRICS = config.get("CWMP_PROMETHEUS_METRICS");
 const BLOCK_NEW_CPE = config.get("BLOCK_NEW_CPE");
 const MODELS_BLACKLIST = config.get("MODELS_BLACKLIST");
 
+const MAX_SESSION_DURATION = 300000;
+const LOCK_REFRESH_INTERVAL = 10000;
+export const REQUEST_TIMEOUT = 10000;
+
 const currentSessions = new WeakMap<Socket, SessionContext>();
 const sessionsNonces = new WeakMap<Socket, string>();
 
-const connectionsInfo = new WeakMap<Socket, { time: number, type: number }>();
+const connectionsInfo = new WeakMap<Socket, { time: number; type: number }>();
 
 const stats = {
-  concurrentRequests: 0
+  concurrentRequests: 0,
 };
 
 let deviceIdsToCaptureXml = new Set<string>();
@@ -85,11 +84,14 @@ const capturedXmlBodies = new Map();
 
 function reevalutedeviceIdsToCaptureXml(): void {
   if (!redisClient.online()) return;
-  redisClient.getList("cwmp_device_ids_to_capture_xml").then((list) => {
-    deviceIdsToCaptureXml = new Set<string>(list);
-  }).catch(() => {
-    deviceIdsToCaptureXml = new Set<string>();
-  })
+  redisClient
+    .getList("cwmp_device_ids_to_capture_xml")
+    .then((list) => {
+      deviceIdsToCaptureXml = new Set<string>(list);
+    })
+    .catch(() => {
+      deviceIdsToCaptureXml = new Set<string>();
+    });
 }
 
 setInterval(reevalutedeviceIdsToCaptureXml, 30000).unref();
@@ -98,35 +100,41 @@ async function authenticate(
   sessionContext: SessionContext,
   body: string
 ): Promise<boolean> {
-  const authExpression: Expression = localCache.getConfigExpression(
-    sessionContext.cacheSnapshot,
-    "cwmp.auth"
-  );
-  if (authExpression == null) return true;
-
-  let authentication;
-
-  if (sessionContext.httpRequest.headers["authorization"]) {
-    try {
-      authentication = auth.parseAuthorizationHeader(
-        sessionContext.httpRequest.headers["authorization"]
-      );
-    } catch (err) {
-      return false;
-    }
+  let authExpression: Expression|undefined;
+  if(sessionContext.cacheSnapshot) {
+    authExpression = localCache.getConfigExpression(
+      sessionContext.cacheSnapshot,
+      "cwmp.auth"
+    );
   }
 
-  if (authentication?.method === "Digest") {
-    const sessionNonce = sessionsNonces.get(sessionContext.httpRequest.socket);
+  if (authExpression == null) return true;
 
-    if (
-      !sessionNonce ||
-      authentication.nonce !== sessionNonce ||
-      (authentication.qop && (!authentication.cnonce || !authentication.nc))
-    )
-      return false;
+  let authentication:any|undefined;
 
-    authentication["body"] = body;
+  if(sessionContext.httpRequest) {
+    if (sessionContext.httpRequest.headers["authorization"]) {
+      try {
+        authentication = auth.parseAuthorizationHeader(
+          sessionContext.httpRequest.headers["authorization"]
+        );
+      } catch (err) {
+        return false;
+      }
+    }
+
+    if (authentication?.method === "Digest") {
+      const sessionNonce = sessionsNonces.get(sessionContext.httpRequest.socket);
+
+      if (
+        !sessionNonce ||
+        authentication.nonce !== sessionNonce ||
+        (authentication.qop && (!authentication.cnonce || !authentication.nc))
+      )
+        return false;
+
+      authentication["body"] = body;
+    }
   }
 
   const res = await evaluateAsync(
@@ -188,8 +196,9 @@ async function writeResponse(
   res,
   close = false
 ): Promise<void> {
-
-  metricsExporter.acsRequestType.labels({ type: sessionContext?.rpcRequest?.name || '<empty>' }).inc()
+  metricsExporter.acsRequestType
+    .labels({ type: sessionContext?.rpcRequest?.name || "<empty>" })
+    .inc();
 
   // Close connection after last request in session
   if (close) res.headers["Connection"] = "close";
@@ -236,12 +245,12 @@ async function writeResponse(
     sessionContext.lastActivity = now;
     currentSessions.set(connection, sessionContext);
     if (now >= sessionContext.extendLock) {
-      sessionContext.extendLock = now + 10000;
-      const lockToken = await cache.acquireLock(
+      sessionContext.extendLock = now + LOCK_REFRESH_INTERVAL;
+      const lockToken = await lock.acquireLock(
         `cwmp_session_${sessionContext.deviceId}`,
-        sessionContext.timeout * 1000 + 15000,
+        sessionContext.timeout * 1000 + LOCK_REFRESH_INTERVAL + REQUEST_TIMEOUT,
         0,
-        sessionContext.sessionId
+        `cwmp_session_${sessionContext.sessionId}`
       );
       if (!lockToken) throw new Error("Failed to extend lock");
     }
@@ -304,7 +313,7 @@ function recordFault(
       channel: channel,
       retries: sessionContext.retries[channel],
     });
-    metricsExporter.faultRpc.inc()
+    metricsExporter.faultRpc.inc();
   }
 
   for (let i = 0; i < provisions.length; ++i) {
@@ -463,7 +472,8 @@ async function applyPresets(sessionContext: SessionContext): Promise<void> {
   const deviceEvents = {};
   for (const p of deviceData.paths.find(Path.parse("Events.*"), false, true)) {
     const attrs = deviceData.attributes.get(p);
-    if (attrs?.value && attrs.value[1][0] >= sessionContext.timestamp)
+    const t = attrs?.value[1][0] as number;
+    if (t >= sessionContext.timestamp)
       deviceEvents[p.segments[1] as string] = true;
   }
 
@@ -608,7 +618,6 @@ async function applyPresets(sessionContext: SessionContext): Promise<void> {
     rpcId: id,
     rpc: acsRequest,
   } = await session.rpcRequest(sessionContext, null);
-
 
   if (fault) {
     recordFault(sessionContext, fault);
@@ -783,11 +792,14 @@ async function nextRpc(sessionContext: SessionContext): Promise<void> {
 }
 
 async function endSession(sessionContext: SessionContext): Promise<void> {
-  let saveCache = sessionContext.cacheUntil != null;
-  if ((deviceIdsToCaptureXml.size > 0)) {
+  if (deviceIdsToCaptureXml.size > 0) {
     if (deviceIdsToCaptureXml.has(sessionContext?.deviceId)) {
       const xmlId = `xml_body_${sessionContext?.deviceId}`;
-      await cache.set(`xml_body_${sessionContext?.deviceId}`, capturedXmlBodies.get(xmlId));
+      // Must verify if cache.set is still ok here!
+      await cache.set(
+        `xml_body_${sessionContext?.deviceId}`,
+        capturedXmlBodies.get(xmlId)
+      );
       capturedXmlBodies.delete(xmlId);
     }
   }
@@ -807,7 +819,7 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
   const noFaultCache = config.get("CWMP_NO_FAULTS_CACHE");
 
   promises.push(
-    db.saveDevice(
+    saveDevice(
       sessionContext.deviceId,
       sessionContext.deviceData,
       sessionContext.new,
@@ -817,73 +829,58 @@ async function endSession(sessionContext: SessionContext): Promise<void> {
 
   if (sessionContext.operationsTouched) {
     for (const k of Object.keys(sessionContext.operationsTouched)) {
-      saveCache = true;
       if (sessionContext.operations[k] && !noFaultCache) {
         promises.push(
-          db.saveOperation(
+          saveOperation(
             sessionContext.deviceId,
             k,
             sessionContext.operations[k]
           )
         );
       } else {
-        promises.push(db.deleteOperation(sessionContext.deviceId, k));
+        promises.push(deleteOperation(sessionContext.deviceId, k));
       }
     }
   }
 
   if (sessionContext.doneTasks?.length) {
-    saveCache = true;
     promises.push(
-      db.clearTasks(sessionContext.deviceId, sessionContext.doneTasks)
+      clearTasks(sessionContext.deviceId, sessionContext.doneTasks)
     );
   }
 
   if (sessionContext.faultsTouched) {
     for (const k of Object.keys(sessionContext.faultsTouched)) {
-      saveCache = true;
       if (sessionContext.faults[k]) {
         sessionContext.faults[k].retries = sessionContext.retries[k];
         promises.push(
-          db.saveFault(sessionContext.deviceId, k, sessionContext.faults[k])
+          saveFault(sessionContext.deviceId, k, sessionContext.faults[k])
         );
       } else {
-        promises.push(db.deleteFault(sessionContext.deviceId, k));
+        promises.push(deleteFault(sessionContext.deviceId, k));
       }
     }
-  }
-
-  if (saveCache && !noFaultCache) {
-    promises.push(
-      cacheDueTasksAndFaultsAndOperations(
-        sessionContext.deviceId,
-        sessionContext.tasks,
-        sessionContext.faults,
-        sessionContext.operations,
-        sessionContext.cacheUntil
-      )
-    );
   }
 
   await Promise.all(promises);
 
   try {
-    await cache.releaseLock(
+    await lock.releaseLock(
       `cwmp_session_${sessionContext.deviceId}`,
-      sessionContext.sessionId
+      `cwmp_session_${sessionContext.sessionId}`
     );
   } catch (e) {
-    if (sessionContext.deviceId.startsWith('C83A35-ACtion%20RG1200')) {
+    if (sessionContext.deviceId.startsWith("C83A35-ACtion%20RG1200")) {
       logger.accessInfo({
         sessionContext: sessionContext,
-        message: 'We found you messing up once again, Action RG1200 on SoftwareVersion=2.1.2...',
+        message:
+          "We found you messing up once again, Action RG1200 on SoftwareVersion=2.1.2...",
       });
     } else {
       // Rethrow
       throw e;
     }
   }
-
   if (sessionContext.new) {
     metricsExporter.registeredDevice.inc();
     logger.accessInfo({
@@ -900,7 +897,7 @@ async function sendAcsRequest(
 ): Promise<void> {
   if (!acsRequest)
     return writeResponse(sessionContext, soap.response(null), true);
-  
+
   if (acsRequest.name === "Download") {
     acsRequest.fileSize = 0;
     if (!acsRequest.url) {
@@ -944,151 +941,90 @@ async function sendAcsRequest(
 }
 
 // When socket closes, store active sessions in cache
-export function onConnection(socket: Socket): void {
-  metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'open' }).inc()
+export async function onConnection(socket: Socket): Promise<void> {
+  metricsExporter.socketConnections
+    .labels({ server: "cwmp", type: "open" })
+    .inc();
   connectionsInfo.set(socket, { time: Date.now(), type: 2 });
 
-  socket.on("close", async () => {
-    metricsExporter.socketConnections.labels({ server: 'cwmp', type: 'close' }).inc()
-    const sessionContext = currentSessions.get(socket);
-    if (!sessionContext) return;
-    metricsExporter.totalConnectionTime.labels({ server: 'cwmp' }).observe(Date.now() - sessionContext.timestamp)
-    currentSessions.delete(socket);
-    if (sessionContext.authState !== 2) {
-      logger.accessError({
-        message: "Authentication failure",
-        sessionContext: sessionContext,
-      });
-      return;
-    }
+  try {
+    await once(socket, "close", MAX_SESSION_DURATION);
+  } catch {
+    socket.destroy();
+  }
+  
+  metricsExporter.socketConnections
+  .labels({ server: "cwmp", type: "close" })
+  .inc();
 
-    const now = Date.now();
-
-    const lastActivity = sessionContext.lastActivity;
-    const timeoutMsg = {
+  const sessionContext = currentSessions.get(socket);
+  if (!sessionContext) return;
+  metricsExporter.totalConnectionTime
+    .labels({ server: "cwmp" })
+    .observe(Date.now() - sessionContext.timestamp);
+  currentSessions.delete(socket);
+  if (sessionContext.authState !== 2) {
+    logger.accessError({
+      message: "Authentication failure",
       sessionContext: sessionContext,
-      message: "Session timeout",
-      sessionTimestamp: sessionContext.timestamp,
-    };
-
-    const timeout =
-      sessionContext.lastActivity + sessionContext.timeout * 1000 - now;
-
-    if (timeout <= 0) {
-      logger.accessError(timeoutMsg);
-      // TODO it's possible that lock would have already been expired
-      await endSession(sessionContext);
-      return;
-    }
-
-    setTimeout(async () => {
-      const sessionContextString = await cache.get(
-        `session_${sessionContext.sessionId}`
-      );
-      if (!sessionContextString) return;
-      const _sessionContext = await session.deserialize(sessionContextString);
-      if (_sessionContext.lastActivity === lastActivity) {
-        logger.accessError(timeoutMsg);
-        await endSession(sessionContext);
-      }
-    }, timeout + 1000).unref();
-
-    if (sessionContext.state === 0) return;
-
-    const sessionContextString = await session.serialize(sessionContext);
-    await cache.set(
-      `session_${sessionContext.sessionId}`,
-      sessionContextString,
-      Math.ceil(timeout / 1000) + 3
-    );
-  });
-}
-
-export function onClientError(err: Error, socket: Socket): void {
-  const remoteAddress = getSocketEndpoints(socket).remoteAddress;
-  localCache
-    .getCurrentSnapshot()
-    .then((cacheSnapshot) => {
-      const debugEnabled = !!localCache.getConfig(
-        cacheSnapshot,
-        "cwmp.debug",
-        {
-          remoteAddress: remoteAddress,
-        },
-        Date.now(),
-        (e) => {
-          if (Array.isArray(e) && e[0] === "FUNC" && e[1] === "REMOTE_ADDRESS")
-            return remoteAddress;
-          return e;
-        }
-      );
-
-      if (debugEnabled) debug.clientError(remoteAddress, err);
-    })
-    .catch((err) => {
-      throw err;
     });
-}
-
-
-async function getDueTasksAndFaultsAndOperations(
-  deviceId,
-  timestamp
-): Promise<{
-  tasks: Task[];
-  faults: { [channel: string]: SessionFault };
-  operations: { [commandKey: string]: Operation };
-  ttl: number;
-}> {
-  const res = await cache.get(`${deviceId}_tasks_faults_operations`);
-  if (res) {
-    const resParsed = JSON.parse(res);
-    return {
-      tasks: resParsed.tasks || [],
-      faults: resParsed.faults || {},
-      operations: resParsed.operations || {},
-      ttl: 0,
-    };
+    return;
   }
 
-  const res2 = await Promise.all([
-    db.getDueTasks(deviceId, timestamp),
-    db.getFaults(deviceId),
-    db.getOperations(deviceId),
-  ]);
-  return {
-    tasks: res2[0][0],
-    faults: res2[1],
-    operations: res2[2],
-    ttl: res2[0][1] || 0,
-  };
-}
+  const now = Date.now();
 
-async function cacheDueTasksAndFaultsAndOperations(
-  deviceId,
-  tasks,
-  faults,
-  operations,
-  cacheUntil
-): Promise<void> {
-  const v = {
-    tasks: null,
-    faults: null,
-    operations: null,
+  const lastActivity = sessionContext.lastActivity;
+  const timeoutMsg = {
+    sessionContext: sessionContext,
+    message: "Session timeout",
+    sessionTimestamp: sessionContext.timestamp,
   };
-  if (tasks.length) v.tasks = tasks;
-  if (Object.keys(faults).length) v.faults = faults;
-  if (Object.keys(operations).length) v.operations = operations;
 
-  let ttl;
-  if (cacheUntil) ttl = Math.trunc((Date.now() - cacheUntil) / 1000);
-  else ttl = config.get("MAX_CACHE_TTL", deviceId);
+  const timeout =
+    sessionContext.lastActivity + sessionContext.timeout * 1000 - now;
+
+  if (timeout <= 0) {
+    logger.accessError(timeoutMsg);
+    // TODO it's possible that lock would have already been expired
+    await endSession(sessionContext);
+    return;
+  }
 
   await cache.set(
-    `${deviceId}_tasks_faults_operations`,
-    JSON.stringify(v),
-    ttl
+    `session_${sessionContext.sessionId}`,
+    await session.serialize(sessionContext),
+    Math.ceil(timeout / 1000) + 3
   );
+
+  await setTimeoutPromise(timeout + 1000, false);
+  const sessionStr = await cache.get(`session_${sessionContext.sessionId}`);
+  if (!sessionStr) return;
+
+  const _sessionContext = await session.deserialize(sessionStr);
+  if (_sessionContext.lastActivity === lastActivity) {
+    logger.accessError(timeoutMsg);
+    await endSession(sessionContext);
+  }
+}
+
+export async function onClientError(err: Error, socket: Socket): Promise<void> {
+  const remoteAddress = getSocketEndpoints(socket).remoteAddress;
+  const cacheSnapshot = await localCache.getRevision();
+  const debugEnabled = !!localCache.getConfig(
+    cacheSnapshot,
+    "cwmp.debug",
+    {
+      remoteAddress: remoteAddress,
+    },
+    Date.now(),
+    (e) => {
+      if (Array.isArray(e) && e[0] === "FUNC" && e[1] === "REMOTE_ADDRESS")
+        return remoteAddress;
+      return e;
+    }
+  );
+
+  if (debugEnabled) debug.clientError(remoteAddress, err);
 }
 
 async function reportBadState(sessionContext: SessionContext): Promise<void> {
@@ -1189,11 +1125,12 @@ async function processRequest(
       );
     }
 
-    if ((deviceIdsToCaptureXml.size > 0)) {
+    if (deviceIdsToCaptureXml.size > 0) {
       if (deviceIdsToCaptureXml.has(sessionContext?.deviceId)) {
         const xmlId = `xml_body_${sessionContext?.deviceId}`;
-        capturedXmlBodies.set(xmlId,
-          (capturedXmlBodies.get(xmlId) || '')+JSON.stringify(body)+'\n\n\n',
+        capturedXmlBodies.set(
+          xmlId,
+          (capturedXmlBodies.get(xmlId) || "") + JSON.stringify(body) + "\n\n\n"
         );
       }
     }
@@ -1208,12 +1145,13 @@ async function processRequest(
       }
     }
 
-    sessionContext.extendLock = sessionContext.timestamp + 10000;
-    const lockToken = await cache.acquireLock(
+    sessionContext.extendLock =
+      sessionContext.timestamp + LOCK_REFRESH_INTERVAL;
+    const lockToken = await lock.acquireLock(
       `cwmp_session_${sessionContext.deviceId}`,
-      sessionContext.timeout * 1000 + 15000,
+      sessionContext.timeout * 1000 + LOCK_REFRESH_INTERVAL + REQUEST_TIMEOUT,
       0,
-      sessionContext.sessionId
+      `cwmp_session_${sessionContext.sessionId}`
     );
 
     if (!lockToken) {
@@ -1395,32 +1333,20 @@ async function processRequest(
   }
 }
 
-export function listener(
+export async function listener(
   httpRequest: IncomingMessage,
   httpResponse: ServerResponse
-): void {
-
+): Promise<void> {
   stats.concurrentRequests += 1;
-  metricsExporter.totalRequests.labels({ server: 'cwmp' }).inc();
-
-  listenerAsync(httpRequest, httpResponse)
-    .then(() => {
-      stats.concurrentRequests -= 1;
-    })
-    .catch((err) => {
-      currentSessions.delete(httpRequest.socket);
-      stats.concurrentRequests -= 1;
-      setTimeout(() => {
-        throw err;
-      });
-      try {
-        httpRequest.socket.unref();
-        httpResponse.writeHead(500, { Connection: "close" });
-        httpResponse.end(`${err.name}: ${err.message}`);
-      } catch (err) {
-        // Ignore
-      }
-    });
+  metricsExporter.totalRequests.labels({ server: "cwmp" }).inc();
+  try {
+    await listenerAsync(httpRequest, httpResponse);
+  } catch (err) {
+    currentSessions.delete(httpRequest.socket);
+    throw err;
+  } finally {
+    stats.concurrentRequests -= 1;
+  }
 }
 
 async function clientError(
@@ -1437,7 +1363,7 @@ async function clientError(
     debugEnabled = sessionContext.debug;
     deviceId = sessionContext.deviceId;
   } else {
-    const cacheSnapshot = await localCache.getCurrentSnapshot();
+    const cacheSnapshot = await localCache.getRevision();
     debugEnabled = !!localCache.getConfig(
       cacheSnapshot,
       "cwmp.debug",
@@ -1478,12 +1404,13 @@ async function listenerAsync(
   httpRequest: IncomingMessage,
   httpResponse: ServerResponse
 ): Promise<void> {
-
-  if (httpRequest.method === 'GET' && url.parse(httpRequest.url).pathname === '/metrics') {
+  if (
+    httpRequest.method === "GET" &&
+    url.parse(httpRequest.url).pathname === "/metrics"
+  ) {
     if (PROMETHEUS_METRICS)
       httpResponse.write(await promClient.register.metrics());
-    else
-      httpResponse.write('# Metrics not enabled\nup 1');
+    else httpResponse.write("# Metrics not enabled\nup 1");
     httpResponse.end();
     return;
   } else if (httpRequest.method !== "POST") {
@@ -1504,13 +1431,16 @@ async function listenerAsync(
     if (match[1] === "session") sessionId = match[2];
 
   // If overloaded, ask CPE to retry in 60 seconds
-  if (!redis.online() || (!sessionId && stats.concurrentRequests > MAX_CONCURRENT_REQUESTS)) {
+  if (
+    !redis.online() ||
+    (!sessionId && stats.concurrentRequests > MAX_CONCURRENT_REQUESTS)
+  ) {
     httpResponse.writeHead(503, {
       "Retry-after": 60,
       Connection: "close",
     });
     httpResponse.end("503 Service Unavailable");
-    metricsExporter.droppedRequests.labels({ server: 'cwmp' }).inc()
+    metricsExporter.droppedRequests.labels({ server: "cwmp" }).inc();
     return;
   }
 
@@ -1536,10 +1466,15 @@ async function listenerAsync(
 
   const chunks: Buffer[] = [];
   try {
+    let readableEnded = false;
+    stream.on("end", () => {
+      readableEnded = true;
+    });
     for await (const chunk of stream) chunks.push(chunk);
     // In Node versions prior to 15, the stream will not emit an error if the
     // connection is closed before the stream is finished.
-    if (!stream.readableEnded) throw new Error("Connection closed");
+    // For Node 12.9+ we can just use stream.readableEnded
+    if (!readableEnded) throw new Error("Connection closed");
   } catch (err) {
     return;
   }
@@ -1650,8 +1585,10 @@ async function listenerAsync(
     );
   }
 
-  metricsExporter.cpeRequestType.labels({ type: rpc.cpeRequest?.name || '<empty>' }).inc()
-    
+  metricsExporter.cpeRequestType
+    .labels({ type: rpc.cpeRequest?.name || "<empty>" })
+    .inc();
+
   if (isNewSession && rpc.cpeRequest?.name !== "Inform") {
     await new Promise((resolve) => setTimeout(resolve, 100));
     const sessionContextString = await cache.pop(`session_${sessionId}`);
@@ -1690,31 +1627,33 @@ async function listenerAsync(
     // from the previous session
     httpResponse.writeHead(503, { "Retry-after": 60, Connection: "close" });
     httpResponse.end("503 Service Unavailable");
-    metricsExporter.droppedRequests.labels({ server: 'cwmp' }).inc()
+    metricsExporter.droppedRequests.labels({ server: "cwmp" }).inc();
     return;
   }
 
-
-  const modelsBlacklist: string[] = String(MODELS_BLACKLIST).split(',');
-  if (modelsBlacklist.length > 0 && modelsBlacklist[0] !== '' &&
-    modelsBlacklist.includes(rpc.cpeRequest.deviceId["ProductClass"])) {
-    httpResponse.writeHead(403, {"Retry-after": 86400,  Connection: "close" });
+  const modelsBlacklist: string[] = String(MODELS_BLACKLIST).split(",");
+  if (
+    modelsBlacklist.length > 0 &&
+    modelsBlacklist[0] !== "" &&
+    modelsBlacklist.includes(rpc.cpeRequest.deviceId["ProductClass"])
+  ) {
+    httpResponse.writeHead(403, { "Retry-after": 86400, Connection: "close" });
     httpResponse.end("403 Forbidden");
-    metricsExporter.droppedRequests.labels({ server: 'cwmp' }).inc();
+    metricsExporter.droppedRequests.labels({ server: "cwmp" }).inc();
     return;
   }
   // Verifying SerialNumber against invalid values and using alternatives
-  let altSerialValue = '';
+  let altSerialValue = "";
   if (rpc.cpeRequest.deviceId["SerialNumber"] === "AABBCCDDEEFF") {
     const keyStr =
-    'InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress';
+      "InternetGatewayDevice.LANDevice.1.LANEthernetInterfaceConfig.1.MACAddress";
     let altSerialFound = false;
 
     for (const p of rpc.cpeRequest.parameterList) {
-      if (p[0] && p[0]['_string']) {
-        if (p[0]['_string'] === keyStr) {
+      if (p[0] && p[0]["_string"]) {
+        if (p[0]["_string"] === keyStr) {
           altSerialFound = true;
-          altSerialValue = <string> p[1];
+          altSerialValue = <string>p[1];
           break;
         }
       }
@@ -1738,12 +1677,12 @@ async function listenerAsync(
       );
     }
   }
-  const deviceId = common.generateDeviceId(rpc.cpeRequest.deviceId,
-    altSerialValue);
 
-  const cacheSnapshot = await localCache.getCurrentSnapshot();
+  const deviceId = generateDeviceId(rpc.cpeRequest.deviceId, altSerialValue);
 
-  metricsExporter.sessionInit.labels({ server: 'cwmp' }).inc();
+  const cacheSnapshot = await localCache.getRevision();
+
+  metricsExporter.sessionInit.labels({ server: "cwmp" }).inc();
   const _sessionContext = session.init(
     deviceId,
     rpc.cwmpVersion,
@@ -1761,19 +1700,14 @@ async function listenerAsync(
   _sessionContext.httpResponse = httpResponse;
   _sessionContext.sessionId = crypto.randomBytes(8).toString("hex");
 
-  const {
-    tasks: dueTasks,
-    faults,
-    operations,
-    ttl: cacheUntil,
-  } = await getDueTasksAndFaultsAndOperations(
-    deviceId,
-    _sessionContext.timestamp
-  );
+  const [dueTasks, faults, operations] = await Promise.all([
+    getDueTasks(deviceId, _sessionContext.timestamp),
+    getFaults(deviceId),
+    getOperations(deviceId),
+  ]);
 
-  _sessionContext.tasks = dueTasks;
+  _sessionContext.tasks = dueTasks[0];
   _sessionContext.operations = operations;
-  _sessionContext.cacheUntil = cacheUntil;
   _sessionContext.faults = faults;
   _sessionContext.retries = {};
   for (const [k, v] of Object.entries(_sessionContext.faults)) {
@@ -1787,7 +1721,7 @@ async function listenerAsync(
     }
   }
 
-  const parameters = await db.fetchDevice(
+  const parameters = await fetchDevice(
     _sessionContext.deviceId,
     _sessionContext.timestamp
   );
@@ -1809,11 +1743,11 @@ async function listenerAsync(
       return;
     }
   }
-  
+
   return processRequest(_sessionContext, rpc, parseWarnings, bodyStr);
 }
 
 metricsExporter.concurrentRequestsCB({
-  labels: { server: 'cwmp' },
-  cb: () => stats.concurrentRequests
-})
+  labels: { server: "cwmp" },
+  cb: () => stats.concurrentRequests,
+});

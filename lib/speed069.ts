@@ -15,7 +15,7 @@
  * redis channel
  */
 
-import { devicesCollection } from "./db";
+import { collections } from "./db/db";
 import { error, info } from "./logger";
 import { PubSubClient } from "./redis";
 
@@ -48,7 +48,7 @@ export function subscribeToInformParamsFromSpeed069() : Promise<void> {
       update[param.name + '._type'] = param.type;
       update[param.name + '._timestamp'] = new Date(timestamp);
     }
-    devicesCollection.updateOne(
+    collections.devices.updateOne(
       query,
       { $set: update },
       { upsert: false },

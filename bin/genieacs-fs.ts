@@ -1,29 +1,10 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-import * as config from "../lib/config";
-import * as logger from "../lib/logger";
-import * as cluster from "../lib/cluster";
-import * as server from "../lib/server";
-import { listener } from "../lib/fs";
-import * as db from "../lib/db";
-import * as redisClient from "../lib/redis"
+import * as config from "../lib/config.ts";
+import * as logger from "../lib/logger.ts";
+import * as cluster from "../lib/cluster.ts";
+import * as server from "../lib/server.ts";
+import { listener } from "../lib/fs.ts";
+import * as db from "../lib/db/db.ts";
+import * as redisClient from "../lib/redis.ts";
 import { version as VERSION } from "../package.json";
 
 logger.init("fs", VERSION);
@@ -33,9 +14,9 @@ const SERVICE_PORT = config.get("FS_PORT") as number;
 
 function exitWorkerGracefully(): void {
   setTimeout(exitWorkerUngracefully, 5000).unref();
-  Promise.all([db.disconnect(), cluster.worker.disconnect()]).catch(
-    exitWorkerUngracefully
-  );
+  Promise.all([db.disconnect(), cluster.worker.disconnect()])
+    .then(logger.close)
+    .catch(exitWorkerUngracefully);
 }
 
 function exitWorkerUngracefully(): void {
@@ -80,7 +61,10 @@ if (!cluster.worker) {
     timeout: 30000,
   };
 
-  let stopping = false;
+  // Need this for Node < 15
+  process.on("unhandledRejection", (err) => {
+    throw err;
+  });
 
   process.on("uncaughtException", (err) => {
     if ((err as NodeJS.ErrnoException).code === "ERR_IPC_DISCONNECTED") return;
@@ -89,21 +73,15 @@ if (!cluster.worker) {
       exception: err,
       pid: process.pid,
     });
-    stopping = true;
     server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
   });
-
-  const _listener = (req, res): void => {
-    if (stopping) res.setHeader("Connection", "close");
-    void listener(req, res);
-  };
 
   const initDBPromise = db.connect();
   const initRedisPromise = redisClient.connect();
 
   const initPromise = Promise.all([initDBPromise, initRedisPromise])
     .then(() => {
-      server.start(options, _listener);
+      server.start(options, listener);
     })
     .catch((err) => {
       setTimeout(() => {
@@ -112,15 +90,13 @@ if (!cluster.worker) {
     });
 
   process.on("SIGINT", () => {
-    stopping = true;
-    initPromise.finally(() => {
+    void initPromise.finally(() => {
       server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
     });
   });
 
   process.on("SIGTERM", () => {
-    stopping = true;
-    initPromise.finally(() => {
+    void initPromise.finally(() => {
       server.stop().then(exitWorkerGracefully).catch(exitWorkerUngracefully);
     });
   });

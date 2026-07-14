@@ -1,31 +1,14 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
 
-import * as device from "./device";
-import * as sandbox from "./sandbox";
-import * as localCache from "./local-cache";
-import * as defaultProvisions from "./default-provisions";
-import { estimateGpnCount } from "./gpn-heuristic";
-import Path from "./common/path";
-import PathSet from "./common/path-set";
-import VersionedMap from "./versioned-map";
-import InstanceSet from "./instance-set";
+import * as device from "./device.ts";
+import * as sandbox from "./sandbox.ts";
+import * as localCache from "./cwmp/local-cache.ts";
+import * as defaultProvisions from "./default-provisions.ts";
+import { estimateGpnCount } from "./gpn-heuristic.ts";
+import Path from "./common/path.ts";
+import PathSet from "./common/path-set.ts";
+import VersionedMap from "./versioned-map.ts";
+import InstanceSet from "./instance-set.ts";
+
 import {
   Attributes,
   SessionContext,
@@ -57,9 +40,10 @@ import {
   FactoryReset,
   AddObjectResponse,
   GetParameterValuesResponse,
-} from "./types";
-import { getRequestOrigin } from "./forwarded";
-import * as logger from "./logger";
+} from "./types.ts";
+import { getRequestOrigin } from "./forwarded.ts";
+import * as logger from "./logger.ts";
+import { encodeTag } from "./util.ts";
 
 const VALID_PARAM_TYPES = new Set([
   "xsd:int",
@@ -216,7 +200,7 @@ export async function inform(
 
   for (const e of rpcReq.event) {
     params.push([
-      Path.parse(`Events.${e.replace(/\s+/g, "_")}`),
+      Path.parse(`Events.${encodeTag(e.replace(/\s+/g, "_"))}`),
       timestamp,
       {
         object: [timestamp, 0],
@@ -638,14 +622,14 @@ async function runProvisions(
         }
         return null;
       }
-      if (sessionContext.skipProvision && provision[0]==='flashman') {
+      if (sessionContext.skipProvision && provision[0] === "flashman") {
         return {
           fault: null,
           clear: [],
           declare: [],
           done: true,
           returnValue: undefined,
-        }
+        };
       } else {
         return sandbox.run(
           allProvisions[provision[0]].script,
@@ -1089,7 +1073,7 @@ export async function rpcRequest(
     sessionContext.deviceData.timestamps.revision = revision;
     sessionContext.deviceData.attributes.revision = revision;
 
-    let run, provisions;
+    let run: typeof runProvisions, provisions;
     if (inception === 0) {
       run = runProvisions;
       provisions = sessionContext.provisions;
@@ -1677,7 +1661,7 @@ function generateGetRpcRequest(
       {},
       sessionContext.timestamp,
       (e) => configContextCallback(sessionContext, e)
-    );
+    ) as number;
 
     const paths = Array.from(syncState.gpn.keys()).sort(
       (a, b) => b.length - a.length
@@ -1723,7 +1707,7 @@ function generateGetRpcRequest(
         est = estimateGpnCount(patterns);
       }
 
-      if (sessionContext.deviceId.substring(11, 7) === 'ZNID') {
+      if (sessionContext.deviceId.substring(11, 7) === "ZNID") {
         // WANDevice must run nextLevel in false
         // to avoid a bug in Zhone
         if(path.toString() === 'InternetGatewayDevice') {
@@ -1760,7 +1744,7 @@ function generateGetRpcRequest(
       {},
       sessionContext.timestamp,
       (e) => configContextCallback(sessionContext, e)
-    );
+    ) as number;
 
     const parameterNames: string[] = [];
     for (const path of syncState.refreshAttributes.value) {
@@ -1791,7 +1775,7 @@ function generateGetRpcRequest(
       {},
       sessionContext.timestamp,
       (e) => configContextCallback(sessionContext, e)
-    );
+    ) as number;
 
     const parameterNames: string[] = [];
     for (const path of syncState.refreshAttributes.notification) {
@@ -1898,7 +1882,7 @@ function generateSetRpcRequest(
     {},
     sessionContext.timestamp,
     (e) => configContextCallback(sessionContext, e)
-  );
+  ) as number;
 
   const DATETIME_MILLISECONDS = !!localCache.getConfig(
     sessionContext.cacheSnapshot,
@@ -1993,7 +1977,8 @@ function generateSetRpcRequest(
   for (const [p, t] of syncState.downloadsDownload) {
     if (!(t > 0 && t <= sessionContext.timestamp)) continue;
     const attrs = deviceData.attributes.get(p);
-    if (!(t <= attrs?.value?.[1]?.[0])) {
+    const t2 = attrs?.value?.[1]?.[0] as number;
+    if (!(t <= t2)) {
       const fileTypeAttrs = deviceData.attributes.get(
         deviceData.paths.get(p.slice(0, -1).concat(Path.parse("FileType")))
       );
@@ -2021,7 +2006,8 @@ function generateSetRpcRequest(
   if (syncState.reboot > 0 && syncState.reboot <= sessionContext.timestamp) {
     const p = sessionContext.deviceData.paths.get(Path.parse("Reboot"));
     const attrs = p ? sessionContext.deviceData.attributes.get(p) : null;
-    if (!(attrs?.value?.[1][0] >= syncState.reboot)) {
+    const t = attrs?.value?.[1][0] as number;
+    if (!(t >= syncState.reboot)) {
       delete syncState.reboot;
       return { name: "Reboot" };
     }
@@ -2034,7 +2020,8 @@ function generateSetRpcRequest(
   ) {
     const p = sessionContext.deviceData.paths.get(Path.parse("FactoryReset"));
     const attrs = p ? sessionContext.deviceData.attributes.get(p) : null;
-    if (!(attrs?.value?.[1][0] >= syncState.factoryReset)) {
+    const t = attrs?.value?.[1][0] as number;
+    if (!(t >= syncState.factoryReset)) {
       delete syncState.factoryReset;
       return { name: "FactoryReset" };
     }
@@ -3050,8 +3037,8 @@ export async function rpcFault(
     if (toClear) {
       for (const c of toClear)
         device.clear(sessionContext.deviceData, c[0], c[1], c[2], c[3]);
+      return null;
     }
-    return null;
   }
 
   const fault: Fault = {
@@ -3079,13 +3066,18 @@ export async function deserialize(
 
     if (r[2]) {
       deviceData.timestamps.setRevisions(path, r[2], sessionContext?.deviceId);
-      if (r[3]) deviceData.attributes.setRevisions(path, r[3], sessionContext?.deviceId);
+      if (r[3])
+        deviceData.attributes.setRevisions(
+          path,
+          r[3],
+          sessionContext?.deviceId
+        );
     }
   }
 
   sessionContext.deviceData = deviceData;
   // Ensure cache is populated
-  await localCache.getCurrentSnapshot();
+  await localCache.getRevision();
 
   return sessionContext;
 }

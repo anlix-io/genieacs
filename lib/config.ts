@@ -1,24 +1,5 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-import { resolve } from "path";
-import { readFileSync, existsSync } from "fs";
+import { resolve } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
 
 // Find project root directory
 export let ROOT_DIR = resolve(__dirname, "..");
@@ -30,26 +11,25 @@ while (!existsSync(`${ROOT_DIR}/package.json`)) {
   }
   ROOT_DIR = d;
 }
-if (!ROOT_DIR.endsWith('/dist')) 
-  ROOT_DIR = resolve(ROOT_DIR,'dist');
+if (!ROOT_DIR.endsWith("/dist")) ROOT_DIR = resolve(ROOT_DIR, "dist");
 
 // For compatibility with v1.1
 let configDir, cwmpSsl, nbiSsl, fsSsl, uiSsl, fsHostname;
 
 const options = {
   EXT_DIR: { type: "path", default: resolve(ROOT_DIR, "config/ext") },
-  
+
   MONGODB_CONNECTION_URL: {
     type: "string",
     default: "mongodb://127.0.0.1/genieacs",
   },
-  
+
   REDIS_CONNECTION_URL: {
     type: "string",
     default: "redis://127.0.0.1:6379",
   },
 
-  CWMP_FLASHMAN_URL: { type: "string", default: "http://localhost:8000"},
+  CWMP_FLASHMAN_URL: { type: "string", default: "http://localhost:8000" },
   CWMP_WORKER_PROCESSES: { type: "int", default: 0 },
   CWMP_PORT: { type: "int", default: 7547 },
   CWMP_INTERFACE: { type: "string", default: "::" },
@@ -112,10 +92,13 @@ const options = {
   LOG_INFO: { type: "string", default: "info" },
   LOG_STATS: { type: "bool", default: false },
   BLOCK_NEW_CPE: { type: "bool", default: false },
-  MODELS_BLACKLIST: {type: "string", default: ""},
+  MODELS_BLACKLIST: { type: "string", default: "" },
 
   // Should probably never be changed
   DEVICE_ONLINE_THRESHOLD: { type: "int", default: 4000 },
+
+  XMPP_JID: { type: "string", default: "" },
+  XMPP_PASSWORD: { type: "string", default: "" },
 };
 
 const allConfig: { [name: string]: string | number } = {};

@@ -1,24 +1,5 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-import { PermissionSet, Expression } from "../types";
-import { evaluate, or } from "./expression";
+import { PermissionSet, Expression } from "../types.ts";
+import { evaluate, or } from "./expression/util.ts";
 
 export default class Authorizer {
   private declare permissionSets: PermissionSet[];
@@ -118,10 +99,9 @@ export default class Authorizer {
         if (["mutation", "options"].includes(entry)) {
           value = object[entry];
           for (const seg of paramName.split(".")) {
-            // typeof null is "object"
-            if (value != null && typeof value !== "object") value = null;
-            else value = value[seg];
             if (value == null) break;
+            if (typeof value !== "object") value = null;
+            else value = value[seg];
           }
         } else if (object[entry]) {
           if (paramName) value = object[entry][paramName];

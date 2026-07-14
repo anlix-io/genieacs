@@ -1,6 +1,5 @@
-
 import * as config from "./config";
-import * as redis from 'redis'
+import * as redis from "redis";
 
 export const Client = redis.createClient({
   url: config.get('REDIS_CONNECTION_URL') as string,
@@ -12,24 +11,24 @@ export const Client = redis.createClient({
 export const PubSubClient = redis.createClient({
   url: config.get('REDIS_CONNECTION_URL') as string,
   socket: {
-    reconnectStrategy: () => 2000
-  }
+    reconnectStrategy: () => 2000,
+  },
 });
 
 let readyToSend = false;
 export function online(): boolean {
   return readyToSend;
-};
+}
 
-Client.on('end', () => {
+Client.on("end", () => {
   readyToSend = false;
 });
 
-Client.on('reconnecting', () => {
+Client.on("reconnecting", () => {
   readyToSend = false;
 });
 
-Client.on('ready', () => {
+Client.on("ready", () => {
   readyToSend = true;
 });
 
@@ -54,13 +53,9 @@ export async function setWithExpire(
   value: string,
   expire: number
 ): Promise<void> {
-  await Client
-    .multi()
-    .set(key, value)
-    .expire(key, expire)
-    .exec()
+  await Client.multi().set(key, value).expire(key, expire).exec();
 }
 
 export async function pop(key: string): Promise<string> {
-  return Client.getDel(key)
+  return Client.getDel(key);
 }

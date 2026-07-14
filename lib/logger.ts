@@ -1,28 +1,8 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-import * as fs from "fs";
-import * as os from "os";
-
-import * as config from "./config";
-import { getRequestOrigin } from "./forwarded";
-import * as redisClient from './redis'
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as config from "./config.ts";
+import { getRequestOrigin } from "./forwarded.ts";
+import * as redisClient from "./redis.ts";
 import {
   SessionContext,
   AcsRequest,
@@ -30,7 +10,7 @@ import {
   CpeFault,
   InformRequest,
   Fault,
-} from "./types";
+} from "./types.ts";
 
 const REOPEN_EVERY = 60000;
 
@@ -48,12 +28,12 @@ let LOG_INFO_DATA = true;
 let LOG_WARN_DATA = true;
 let LOG_ERROR_DATA = true;
 
-if(LOG_INFO === 'warn') {
+if (LOG_INFO === "warn") {
   LOG_INFO_DATA = false;
-} else if(LOG_INFO === 'error') {
+} else if (LOG_INFO === "error") {
   LOG_INFO_DATA = false;
   LOG_WARN_DATA = false;
-} else if(LOG_INFO === 'none') {
+} else if (LOG_INFO === "none") {
   LOG_INFO_DATA = false;
   LOG_WARN_DATA = false;
   LOG_ERROR_DATA = false;
@@ -167,7 +147,7 @@ export function init(service: string, version: string): void {
   if (LOG_FILE || ACCESS_LOG_FILE)
     // Can't use setInterval as we need all workers to cehck at the same time
     setTimeout(reopen, REOPEN_EVERY - (Date.now() % REOPEN_EVERY)).unref();
-  
+
   setInterval(reevaluteDeviceIdsToLog, 30000).unref();
 }
 
@@ -256,11 +236,14 @@ export function flatten(
 
 function reevaluteDeviceIdsToLog(): void {
   if (!redisClient.online()) return;
-  redisClient.getList("cwmp_device_ids_to_log").then((list) => {
-    deviceIdsToLog = new Set<string>(list);
-  }).catch(() => {
-    deviceIdsToLog = new Set<string>();
-  })
+  redisClient
+    .getList("cwmp_device_ids_to_log")
+    .then((list) => {
+      deviceIdsToLog = new Set<string>(list);
+    })
+    .catch(() => {
+      deviceIdsToLog = new Set<string>();
+    });
 }
 
 function formatJson(
@@ -354,10 +337,9 @@ export function error(details: Record<string, unknown>): void {
 
 export function accessLog(details: Record<string, unknown>): void {
   details.timestamp = new Date().toISOString();
-  if ((deviceIdsToLog.size > 0) && details && details.sessionContext) {
+  if (deviceIdsToLog.size > 0 && details && details.sessionContext) {
     const sessionContext = details.sessionContext as SessionContext;
-    if (deviceIdsToLog.has(sessionContext.deviceId))
-      info(details);
+    if (deviceIdsToLog.has(sessionContext.deviceId)) info(details);
   }
   if (ACCESS_LOG_FORMAT === "json") {
     Object.assign(details, defaultMeta);
@@ -368,25 +350,25 @@ export function accessLog(details: Record<string, unknown>): void {
 }
 
 export function accessInfo(details: Record<string, unknown>): void {
-  if(!LOG_INFO_DATA) return;
+  if (!LOG_INFO_DATA) return;
   details.severity = "info";
   accessLog(details);
 }
 
 export function accessWarn(details: Record<string, unknown>): void {
-  if(!LOG_WARN_DATA) return;
+  if (!LOG_WARN_DATA) return;
   details.severity = "warn";
   accessLog(details);
 }
 
 export function accessError(details: Record<string, unknown>): void {
-  if(!LOG_ERROR_DATA) return;
+  if (!LOG_ERROR_DATA) return;
   details.severity = "error";
   accessLog(details);
 }
 
 export function accessStats(details: Record<string, unknown>): void {
-  if(!LOG_STATS) return;
+  if (!LOG_STATS) return;
   details.severity = "info";
   accessLog(details);
 }

@@ -33,7 +33,7 @@
  * expected.
  */
 
-import * as vm from "vm";
+import * as vm from "node:vm";
 import seedrandom from "seedrandom";
 import * as device from "./device";
 import * as extensions from "./extensions";
@@ -59,7 +59,7 @@ const UPGRADE = Symbol();
 
 const UNDEFINED = undefined;
 
-const context = vm.createContext();
+const context = vm.createContext(undefined, { microtaskMode: "afterEvaluate" });
 
 const FORCE_CUSTOM_SCRIPT_LOGGING =
   process.env.FLM_FORCE_CUSTOM_SCRIPT_LOGGING === 'true';
@@ -81,7 +81,7 @@ function runExtension(sessionContext, key, extCall): Promise<Fault> {
   }
 
   let prom = re.get(key);
-  if (!prom) {
+  if (prom == null) {
     re.set(
       key,
       (prom = new Promise((resolve, reject) => {
@@ -335,7 +335,7 @@ function ext(...args: unknown[]): any {
 }
 
 function log(msg: string, meta: Record<string, unknown>): void {
-  if(logger.LOG_INFO_DATA) {
+  if (logger.LOG_INFO_DATA) {
     if (state.revision === state.maxRevision && state.extCounter >= 0) {
       const details = Object.assign({}, meta, {
         sessionContext: state.sessionContext,
@@ -364,27 +364,26 @@ interface alertSchema {
   acsURL: string;
   connectionRequestURL: string;
   metric: {
-    message: string,
-    reason: string,
+    message: string;
+    reason: string;
   };
 }
 
-function alert(schema: alertSchema):void {
+function alert(schema: alertSchema): void {
   if (logger.LOG_WARN_DATA) {
     if (state.revision === state.maxRevision && state.extCounter >= 0) {
       const prefixArray: string[] = [];
       for (const [key, value] of Object.entries(schema)) {
-        if (typeof value === 'string')
-          prefixArray.push(`${key}: ${value}`);
+        if (typeof value === "string") prefixArray.push(`${key}: ${value}`);
       }
-      const prefix = prefixArray.join(', ');
-      const details = Object.assign({}, {
-        sessionContext: state.sessionContext,
-        message: `[${
-          schema.metric.reason}] ${
-          prefix} -> ${
-          schema.metric.message}`,
-      });
+      const prefix = prefixArray.join(", ");
+      const details = Object.assign(
+        {},
+        {
+          sessionContext: state.sessionContext,
+          message: `[${schema.metric.reason}] ${prefix} -> ${schema.metric.message}`,
+        }
+      );
       logger.warn(details);
       metricsExporter.failedProvisions.labels({
         is_igd: schema.isIGDModel ?? 'unknown',
@@ -1475,7 +1474,7 @@ export async function run(
   startRevision: number,
   maxRevision: number,
   extCounter,
-  name?:string,
+  name?: string
 ): Promise<ScriptResult> {
   state = {
     sessionContext: sessionContext,
@@ -1490,11 +1489,10 @@ export async function run(
     globals: globals,
   };
 
-  const endTimer = 
-    metricsExporter.provisionDuration.
-    labels({name:name??'unknown', ext_counter:extCounter})
-    .startTimer()
-  
+  const endTimer = metricsExporter.provisionDuration
+    .labels({ name: name ?? "unknown", ext_counter: extCounter })
+    .startTimer();
+
   for (const n of Object.keys(context)) delete context[n];
 
   Object.assign(context, globals);
@@ -1510,7 +1508,7 @@ export async function run(
   // Try parsing the second argument as JSON, if it fails, throw an error
   // But only for scripts that come with scriptInfo in arguments
   try {
-    ret = script.runInContext(context, { displayErrors: false });
+    ret = script.runInContext(context, { displayErrors: false, timeout: 50 });
     status = 0;
     // Send a request to Flashman to inform that this script already finished
     // running
