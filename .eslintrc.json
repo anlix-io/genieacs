@@ -20,11 +20,8 @@
     "no-buffer-constructor": "error",
     "prefer-const": ["error", { "destructuring": "all" }],
     "eqeqeq": ["error", "always", { "null": "ignore" }],
-<<<<<<< HEAD
-=======
     "no-return-await": "error",
     "@typescript-eslint/no-shadow": ["error", { "allow": ["err"] }],
->>>>>>> development
     "@typescript-eslint/no-explicit-any": 0,
     "@typescript-eslint/no-use-before-define": [
       "error",
