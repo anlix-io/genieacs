@@ -100,6 +100,7 @@ export class IterationMapCache {
     for (let revision = this.currentRevision; revision >= 0; --revision) {
       const value = this.traversePath(path, this.valueCache[revision]);
       if (value === DeletedValue) return undefined;
+      if (value === null) return null;
       if (value !== undefined && typeof value !== 'object') return value;
     }
 
