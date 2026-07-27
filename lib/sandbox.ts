@@ -759,7 +759,7 @@ export function getValue(path: string): boolean | number | string | undefined {
   // Get the value
   declare(
     path,
-    { value: SandboxDate.now(null, null), path: SandboxDate.now(null, null) },
+    { value: SandboxDate.now(null, null) },
     {},
   );
 
