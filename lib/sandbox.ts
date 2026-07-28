@@ -427,6 +427,12 @@ export function flog(...args: any[]): void {
     .map((arg) => typeof arg === 'object' ? JSON.stringify(arg) : arg)
     .join(" ");
 
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.log(message);
+  }
+
   // If the message array does not exists yet, create it
   if (!state.sessionContext.customScriptInfo?.messages)
     state.sessionContext.customScriptInfo.messages = [];
@@ -471,6 +477,12 @@ export function ferror(...args: any[]): void {
   const message = '[ ERROR ] ' + args
     .map((arg) => typeof arg === 'object' ? JSON.stringify(arg) : arg)
     .join(" ");
+
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.error(message);
+  }
 
   // If the message array does not exists yet, create it
   if (!state.sessionContext.customScriptInfo?.messages)
@@ -690,6 +702,7 @@ function getLastRevisionValueOrCommit(
     );
 
     if (savedTime && time && time >= SandboxDate.now(null, null)) return size;
+    if (savedTime && time && size === 0) return size;
   }
 
   // The value isn't in deviceData yet. Force genieacs to fetch the
@@ -755,6 +768,12 @@ export function getValue(path: string): boolean | number | string | undefined {
   const executionCache = state.sessionContext.customScriptInfo.executionCache;
   const cachedValue = executionCache.getValue(path);
   if (cachedValue !== undefined) return cachedValue ?? undefined;
+
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.log(`getValue(${path})`);
+  }
 
   // Get the value
   declare(
@@ -843,6 +862,12 @@ export function setValue(
   // Audit this setValue action before sending
   audit(ActionType.SET_VALUE, path, value);
 
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.log(`setValue(${path}, ${value})`);
+  }
+
   // Set the value
   declare(path, {}, { value: value });
 
@@ -909,6 +934,12 @@ export function addObject(
   const cachedValue = executionCache.getAddObjectValue(path);
   if (cachedValue !== undefined) return cachedValue;
 
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.log(`addObject(${path}) - getting current size`);
+  }
+
   // Get the amount of objects already present at the path
   declare(
     path,
@@ -939,6 +970,12 @@ export function addObject(
 
   // Audit this addition
   audit(ActionType.ADD_OBJECT, path, newSize);
+
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.log(`addObject(${path}) - adding object`);
+  }
 
   // Create the new object
   declare(
@@ -1007,6 +1044,11 @@ export function deleteObject(
   const cachedValue = executionCache.getDeleteObjectValue(path);
   if (cachedValue !== undefined) return true;
 
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.log(`deleteObject(${path}) - getting current size`);
+  }
 
   // Get the amount of objects already present at the path
   declare(
@@ -1047,6 +1089,12 @@ export function deleteObject(
 
   // Audit this deletion
   audit(ActionType.DELETE_OBJECT, path, newSize);
+
+  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+    // true, also log to the console
+    console.log(`deleteObject(${path}) - deleting object`);
+  }
 
   // Delete the last object
   // If not wildcard, set the path size to 0
