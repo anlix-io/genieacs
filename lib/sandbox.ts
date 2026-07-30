@@ -1078,7 +1078,7 @@ export function deleteObject(
   // If the size is < 0, return
   if (newSize < 0) {
     ferror(
-      `deleteObject() called resulting in a negative size: ${newSize}.` +
+      `deleteObject(${path}) called resulting in a negative size: ${newSize}.` +
         ` Current size was: ${currentSize}`,
     );
     return false;
