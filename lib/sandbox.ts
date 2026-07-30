@@ -43,7 +43,7 @@ import Path from "./common/path";
 import { Fault, SessionContext, ScriptResult, ActionType } from "./types";
 import { metricsExporter } from "./metrics";
 import request from "request";
-import { IterationMapCache } from "./iteration-map";
+import { FunctionCall, IterationMapCache } from "./iteration-map";
 
 // Used for throwing to exit user script and commit
 const COMMIT = Symbol();
@@ -765,30 +765,51 @@ export function getValue(path: string): boolean | number | string | undefined {
   }
 
   // If we have this field in cache, return early
-  const executionCache = state.sessionContext.customScriptInfo.executionCache;
-  const cachedValue = executionCache.getValue(path);
-  if (cachedValue !== undefined) return cachedValue ?? undefined;
+  const funcParams: FunctionCall = {
+    __varType: 'FunctionCall',
+    type: 'getValue',
+    called: { path },
+  };
+  const executionCache: IterationMapCache =
+    state.sessionContext.customScriptInfo.executionCache;
+  
+  // This is the case that this function was not called
+  if (!executionCache.calledFunction(funcParams)) {
+    if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+      // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+      // true, also log to the console
+      console.log(`getValue(${path})`);
+    }
+    
+    // Send the command to the CPE by forcing a commit
+    declare(path, { value: Date.now() }, {});
+    state.revision = state.maxRevision;
+    commit();
 
-  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
-    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
-    // true, also log to the console
-    console.log(`getValue(${path})`);
+    // Unreachable
+    return UNDEFINED;
+  } else if (!executionCache.hasCallReturnValue(funcParams)) {
+    // This is the case that this function was called before but we still don't
+    // have the value in cache
+    const readRevision = Math.max(state.maxRevision, state.revision);
+    const parsedPath = Path.parse(path);
+    const deviceData = state.sessionContext.deviceData;
+    const unpacked = device.unpack(deviceData, parsedPath, readRevision);
+    let value: boolean | number | string | undefined = undefined;
+    if (unpacked.length) {
+      const attrs = deviceData.attributes.get(unpacked[0], readRevision);
+      value = attrs?.value?.[1];
+    } else {
+      value = undefined;
+    }
+
+    // Save the value to next iterations
+    executionCache.storeCallReturnValue(funcParams, value);
+    return value;
   }
 
-  // Get the value
-  declare(
-    path,
-    { value: SandboxDate.now(null, null) },
-    {},
-  );
-
-  // Try getting the parameter, it might throw
-  const parameter = getLastRevisionValueOrCommit(path);
-
-  // Save the value to next iterations
-  executionCache.saveValue(path, parameter ?? null);
-
-  return parameter ?? undefined;
+  // This is the case we did all the operations
+  return executionCache.getCallReturnValue(funcParams);
 }
 
 /**
@@ -851,31 +872,38 @@ export function setValue(
     );
   }
 
-  // Try getting the setted value
-  const executionCache = state.sessionContext.customScriptInfo.executionCache;
-  const cachedValue = executionCache.getSettedValue(path);
-  if (cachedValue !== undefined && cachedValue === value) return true;
+  // If we have this field in cache, return early
+  const funcParams: FunctionCall = {
+    __varType: 'FunctionCall',
+    type: 'setValue',
+    called: { path, value },
+  };
+  const executionCache: IterationMapCache =
+    state.sessionContext.customScriptInfo.executionCache;
+  
+  // This is the case that this function was not called
+  if (!executionCache.calledFunction(funcParams)) {
+    if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+      // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+      // true, also log to the console
+      console.log(`setValue(${path}, ${value})`);
+    }
 
-  // Save the setted value to next iterations
-  executionCache.setValue(path, value);
+    // Save the value to next iterations
+    audit(ActionType.SET_VALUE, path, value);
+    executionCache.storeCallReturnValue(funcParams, true);
+    
+    // Send the command to the CPE by forcing a commit
+    declare(path, {}, {value});
+    state.revision = state.maxRevision;
+    commit();
 
-  // Audit this setValue action before sending
-  audit(ActionType.SET_VALUE, path, value);
-
-  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
-    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
-    // true, also log to the console
-    console.log(`setValue(${path}, ${value})`);
+    // Unreachable
+    return true;
   }
 
-  // Set the value
-  declare(path, {}, { value: value });
-
-  // Force committing the changes
-  state.revision = state.maxRevision;
-  commit();
-
-  return true;
+  // This is the case we did all the operations
+  return !!executionCache.getCallReturnValue(funcParams);
 }
 
 /**
@@ -1038,82 +1066,38 @@ export function deleteObject(
     );
   }
 
-  // If we already have a cached size for this path, use it to avoid unnecessary
-  // declares and COMMITs
-  const executionCache = state.sessionContext.customScriptInfo.executionCache;
-  const cachedValue = executionCache.getDeleteObjectValue(path);
-  if (cachedValue !== undefined) return true;
+  // If we have this field in cache, return early
+  const funcParams: FunctionCall = {
+    __varType: 'FunctionCall',
+    type: 'deleteObject',
+    called: { path },
+  };
+  const executionCache: IterationMapCache =
+    state.sessionContext.customScriptInfo.executionCache;
+  
+  // This is the case that this function was not called
+  if (!executionCache.calledFunction(funcParams)) {
+    if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+      // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+      // true, also log to the console
+      console.log(`deleteObject(${path})`);
+    }
 
-  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
-    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
-    // true, also log to the console
-    console.log(`deleteObject(${path}) - getting current size`);
+    // Save the value to next iterations
+    audit(ActionType.DELETE_OBJECT, path, true);
+    executionCache.storeCallReturnValue(funcParams, true);
+    
+    // Send the command to the CPE by forcing a commit
+    declare(path, {}, { path: 0 });
+    state.revision = state.maxRevision;
+    commit();
+
+    // Unreachable
+    return true;
   }
 
-  // Get the amount of objects already present at the path
-  declare(
-    path,
-    { path: SandboxDate.now(null, null) },
-    {},
-  ) as { size?: number };
-  const parameter =
-    executionCache.getObjectSize(path) ??
-    getLastRevisionValueOrCommit(path, 'size');
-  const currentSize = parameter ?? 1;
-
-  // If currentSize is undefined, return an error
-  if (typeof currentSize !== 'number') {
-    ferror(
-      'Unable to determine the current size of objects at path:' +
-       ` ${path}.`,
-    );
-    throw new Error(
-      `Unable to determine the current size of objects at path: ${path}`,
-    );
-  }
-
-  // The new size will be current size minus 1 that we are deleting
-  const newSize = currentSize - 1;
-
-  // If the size is < 0, return
-  if (newSize < 0) {
-    ferror(
-      `deleteObject(${path}) called resulting in a negative size: ${newSize}.` +
-        ` Current size was: ${currentSize}`,
-    );
-    return false;
-  }
-
-  // Save the value to next iterations
-  if (parameter !== UNDEFINED) executionCache.deleteObject(path, newSize);
-
-  // Audit this deletion
-  audit(ActionType.DELETE_OBJECT, path, newSize);
-
-  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
-    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
-    // true, also log to the console
-    console.log(`deleteObject(${path}) - deleting object`);
-  }
-
-  // Delete the last object
-  // If not wildcard, set the path size to 0
-  // Case of X.Y.Z.* -> subtract the size
-  // Case of X.Y.Z.[...] -> subtract the size
-  // Case of X.Y.Z.2 -> delete the object at index 2, so the size is 0 for it
-  const isWildcard =
-    path.endsWith("*") || (/\[\]|\[\w+:\w+(,\w+:\w+)*\]$/).test(path);
-  declare(
-    path,
-    { path: SandboxDate.now(null, null) },
-    { path: isWildcard ? newSize : 0 },
-  ) as { path?: string };
-
-  // Force committing the changes
-  state.revision = state.maxRevision;
-  commit();
-
-  return true;
+  // This is the case we did all the operations
+  return !!executionCache.getCallReturnValue(funcParams);
 }
 
 /**
