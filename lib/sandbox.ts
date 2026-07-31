@@ -40,7 +40,7 @@ import * as extensions from "./extensions";
 import * as logger from "./logger";
 import * as scheduling from "./scheduling";
 import Path from "./common/path";
-import { Fault, SessionContext, ScriptResult, ActionType } from "./types";
+import { Fault, SessionContext, ScriptResult, ActionType, DeviceData } from "./types";
 import { metricsExporter } from "./metrics";
 import request from "request";
 import { FunctionCall, IterationMapCache } from "./iteration-map";
@@ -613,110 +613,6 @@ export function sendAuditLogs(): void {
 }
 
 /**
- * Gets the value of a parameter at the specified path directly from the device
- * data at the last revision, bypassing the ParameterWrapper getters and their
- * reliance on state.revision. If the value is not found, it forces a COMMIT to
- * make genieacs fetch the parameter and re-run the script on the next
- * iteration.
- *
- * @param {string} path - The path of the parameter to get.
- */
-function getLastRevisionValueOrCommit(
-  path: string,
-  where: 'value' | 'size' = 'value',
-): boolean | number | string | undefined | null {
-  // Read the value directly at the highest revision available instead of
-  // relying on the ParameterWrapper getter (which reads at state.revision).
-  //
-  // Why this matters: every script re-run resets state.revision to 0, and
-  // commit() only advances it by 1 per call. When the user calls getValue()
-  // after init() — which on subsequent runs returns early without performing
-  // the commits it normally does — state.revision stays very low (e.g. 1),
-  // while data fetched in earlier iterations lives at higher revisions
-  // (e.g. 3 or 4). VersionedMap.get(path, 1) would then return NONEXISTENT
-  // because revisions[1] was filled with NONEXISTENT when the value was
-  // first set at revision 3+. Reading at maxRevision sees the latest data
-  // regardless of how many commits the current run made.
-  const executionCache = state.sessionContext.customScriptInfo.executionCache;
-  const readRevision = Math.max(state.maxRevision, state.revision);
-  const parsedPath = Path.parse(path);
-  const deviceData = state.sessionContext.deviceData;
-  const unpacked = device.unpack(deviceData, parsedPath, readRevision);
-  if (where === 'value') {
-    const savedTime = executionCache.getObjectTimestamp(path);
-
-    // Save the timestamp to not execute the same declare again
-    executionCache.saveObjectTimestamp(
-      path,
-      SandboxDate.now(null, null),
-    );
-
-    // If we have the parameter, return only if it is as new as possible
-    if (unpacked.length) {
-      const attrs = deviceData.attributes.get(unpacked[0], readRevision);
-      const valueAttr = attrs?.value?.[1];
-      const time = attrs?.value?.[0] ?? savedTime;
-
-      // Only return the value if it has a timestamp and it's as new as possible
-      if (
-        time && time >= SandboxDate.now(null, null)
-      ) return valueAttr?.[0] as boolean | number | string | undefined | null;
-    } else if (savedTime && savedTime >= SandboxDate.now(null, null)) {
-      // If we don't have the parameter but we have a timestamp for it, return
-      // null
-      // This might be the case where the parameter doesn't exist in the TR-069
-      // tree
-      return null;
-    }
-  } else if (where === 'size') {
-    // Get the size
-    const parsedBasePath = Path.parse(path);
-    const unpackedBase = device.unpack(
-      deviceData,
-      parsedBasePath,
-      readRevision,
-    );
-    const size = unpackedBase.length;
-
-    // Get the time we got this path, remove the * or [...] as they might not
-    // exist and thus return an empty path
-    const upperPath = path
-      .replace(/\.[*[].*$/, '')
-      .replace(/\.$/, '');
-    const parsedUpperPath = Path.parse(upperPath);
-    const unpackedUpper = device.unpack(
-      deviceData,
-      parsedUpperPath,
-      readRevision,
-    );
-    const attrs = deviceData.attributes.get(unpackedUpper[0], readRevision);
-    const savedTime = executionCache.getObjectTimestamp(path);
-    const time = attrs?.object?.[0] ?? savedTime;
-
-    // Save the timestamp
-    // This can save the infinite loop caused by always trying to commit a path
-    // that doesn't exist
-    executionCache.saveObjectTimestamp(
-      path,
-      time ?? SandboxDate.now(null, null),
-    );
-
-    if (savedTime && time && time >= SandboxDate.now(null, null)) return size;
-    if (savedTime && time && size === 0) return size;
-  }
-
-  // The value isn't in deviceData yet. Force genieacs to fetch the
-  // parameter and re-run the script on the next iteration by throwing
-  // COMMIT. We jump state.revision up to maxRevision so the next commit()
-  // trips the `revision === maxRevision + 1` condition and actually throws.
-  state.revision = state.maxRevision;
-  commit(); // throws COMMIT because of the state.revision we just set
-
-  // Unreachable
-  return UNDEFINED;
-}
-
-/**
  * Gets the value of a parameter at the specified path.
  *
  * @param {string} path - The path of the parameter to get.
@@ -793,12 +689,12 @@ export function getValue(path: string): boolean | number | string | undefined {
     // have the value in cache
     const readRevision = Math.max(state.maxRevision, state.revision);
     const parsedPath = Path.parse(path);
-    const deviceData = state.sessionContext.deviceData;
+    const deviceData: DeviceData = state.sessionContext.deviceData;
     const unpacked = device.unpack(deviceData, parsedPath, readRevision);
     let value: boolean | number | string | undefined = undefined;
     if (unpacked.length) {
       const attrs = deviceData.attributes.get(unpacked[0], readRevision);
-      value = attrs?.value?.[1];
+      value = attrs?.value?.[1]?.[0];
     } else {
       value = undefined;
     }
@@ -809,7 +705,22 @@ export function getValue(path: string): boolean | number | string | undefined {
   }
 
   // This is the case we did all the operations
-  return executionCache.getCallReturnValue(funcParams);
+  const value = executionCache.getCallReturnValue(funcParams);
+
+  // If value is not string, number, boolean or undefined, return an error
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean" &&
+    typeof value !== "undefined"
+  ) {
+    ferror(
+      `getValue() returned a value of invalid type: ${typeof value}.`,
+    );
+    return UNDEFINED;
+  }
+
+  return value;
 }
 
 /**
@@ -915,7 +826,7 @@ export function setValue(
  */
 export function addObject(
   path: string,
-): number | undefined {
+): string | undefined {
   // If not initialized, throw an error
   if (!state.sessionContext.customScriptInfo?.initialized)
     throw new Error("addObject: Sandbox not initialized");
@@ -959,64 +870,163 @@ export function addObject(
   // If we already have a cached size for this path, use it to avoid unnecessary
   // declares and COMMITs
   const executionCache = state.sessionContext.customScriptInfo.executionCache;
-  const cachedValue = executionCache.getAddObjectValue(path);
-  if (cachedValue !== undefined) return cachedValue;
+  const firstGetParams: FunctionCall = {
+    __varType: 'FunctionCall',
+    type: 'getValue',
+    called: { path },
+  };
 
-  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
-    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
-    // true, also log to the console
-    console.log(`addObject(${path}) - getting current size`);
+  // First part, get the list of objects at the path
+  let firstGetValue: Array<string> | undefined = undefined;
+  if (!executionCache.calledFunction(firstGetParams)) {
+    if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+      // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+      // true, also log to the console
+      console.log(`addObject(${path}) - getting the path`);
+    }
+    
+    // Send the command to the CPE by forcing a commit
+    declare(path, { path: Date.now() }, {});
+    state.revision = state.maxRevision;
+    commit();
+
+    // Unreachable
+    return UNDEFINED;
+  } else if (!executionCache.hasCallReturnValue(firstGetParams)) {
+    // This is the case that this function was called before but we still don't
+    // have the value in cache
+    const readRevision = Math.max(state.maxRevision, state.revision);
+    const parsedPath = Path.parse(path);
+    const deviceData: DeviceData = state.sessionContext.deviceData;
+    const unpacked = device.unpack(deviceData, parsedPath, readRevision);
+
+    // Save the value to next iterations
+    executionCache.storeCallReturnValue(firstGetParams, unpacked);
+    firstGetValue = unpacked
+      .map((treePath) => treePath?.toString())
+      .filter((treePath) => !!treePath);
+  } else {
+    // Case where we already run
+    firstGetValue = executionCache.getCallReturnValue(firstGetParams);
   }
 
-  // Get the amount of objects already present at the path
-  declare(
-    path,
-    { path: SandboxDate.now(null, null) },
-    {},
-  ) as { size?: number };
-  const parameter =
-    executionCache.getObjectSize(path) ??
-    getLastRevisionValueOrCommit(path, 'size');
-  const currentSize = parameter ?? 0;
-
-  // If currentSize is undefined, return an error
-  if (typeof currentSize !== 'number') {
+  // If firstGetValue is undefined, return an error
+  if (!firstGetValue) {
     ferror(
-      'Unable to determine the current size of objects at path:' +
+      'Unable to get the list of objects at path:' +
        ` ${path}.`,
     );
     throw new Error(
-      `Unable to determine the current size of objects at path: ${path}`,
+      `Unable to get the list of objects at path: ${path}`,
     );
   }
 
-  // The new size will be current size plus 1 that we are creating
-  const newSize = currentSize + 1;
+  // Second part, add the object
+  const addParams: FunctionCall = {
+    __varType: 'FunctionCall',
+    type: 'addObject',
+    called: { path },
+  };
 
-  // Save the value to next iterations
-  if (parameter !== UNDEFINED) executionCache.addObject(path, newSize);
+  let addValue: boolean | undefined = undefined;
+  if (!executionCache.calledFunction(addParams)) {
+    if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+      // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+      // true, also log to the console
+      console.log(`addObject(${path})`);
+    }
 
-  // Audit this addition
-  audit(ActionType.ADD_OBJECT, path, newSize);
-
-  if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
-    // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
-    // true, also log to the console
-    console.log(`addObject(${path}) - adding object`);
+    // Save the value to next iterations
+    audit(ActionType.ADD_OBJECT, path, true);
+    executionCache.storeCallReturnValue(addParams, true);
+    
+    // Send the command to the CPE by forcing a commit
+    declare(path, {}, { path: firstGetValue.length + 1 },
+  ) as { path?: string };
+    state.revision = state.maxRevision;
+    commit();
+  } else {
+    addValue = !!executionCache.getCallReturnValue(addParams);
   }
 
-  // Create the new object
-  declare(
-    path,
-    { path: SandboxDate.now(null, null) },
-    { path: newSize },
-  ) as { path?: string };
+  // If addValue is undefined, return an error
+  if (addValue === undefined) {
+    ferror(
+      'Unable to add object at path:' +
+       ` ${path}.`,
+    );
+    throw new Error(
+      `Unable to add object at path: ${path}`,
+    );
+  }
 
-  // Force committing the changes
-  state.revision = state.maxRevision;
-  commit();
+  // Third step, get the paths again and check the instance that was added
+  const secondGetParams: FunctionCall = {
+    __varType: 'FunctionCall',
+    type: 'getValue',
+    called: { path },
+  };
 
-  return newSize;
+  // First part, get the list of objects at the path
+  let secondGetValue: Array<string> | undefined = undefined;
+  if (!executionCache.calledFunction(secondGetParams)) {
+    if (process.env.FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL === 'true') {
+      // If the environment variable FLM_LOG_CUSTOM_SCRIPT_TO_TERMINAL is set to
+      // true, also log to the console
+      console.log(`addObject(${path}) - getting the path again`);
+    }
+    
+    // Send the command to the CPE by forcing a commit
+    declare(path, { path: Date.now() }, {});
+    state.revision = state.maxRevision;
+    commit();
+
+    // Unreachable
+    return UNDEFINED;
+  } else if (!executionCache.hasCallReturnValue(secondGetParams)) {
+    // This is the case that this function was called before but we still don't
+    // have the value in cache
+    const readRevision = Math.max(state.maxRevision, state.revision);
+    const parsedPath = Path.parse(path);
+    const deviceData: DeviceData = state.sessionContext.deviceData;
+    const unpacked = device.unpack(deviceData, parsedPath, readRevision);
+
+    // Save the value to next iterations
+    executionCache.storeCallReturnValue(secondGetParams, unpacked);
+    secondGetValue = unpacked
+      .map((treePath) => treePath?.toString())
+      .filter((treePath) => !!treePath);
+  } else {
+    // Case where we already run
+    secondGetValue = executionCache.getCallReturnValue(secondGetParams);
+  }
+
+  // If firstGetValue is undefined, return an error
+  if (!secondGetValue) {
+    ferror(
+      'Unable to get the second list of objects at path:' +
+       ` ${path}.`,
+    );
+    throw new Error(
+      `Unable to get the second list of objects at path: ${path}`,
+    );
+  }
+
+  // Get the instance that was added by comparing the two lists
+  const addedInstance = secondGetValue.find(
+    (instance) => !firstGetValue.includes(instance)
+  );
+
+  // If addedInstance is undefined, log the error and return undefined
+  if (!addedInstance) {
+    ferror(
+      'Unable to determine the instance that was added at path:' +
+       ` ${path}.`,
+    );
+    return UNDEFINED;
+  }
+  
+  return addedInstance.toString();
 }
 
 /**

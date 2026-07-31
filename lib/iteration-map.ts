@@ -2,24 +2,29 @@ export type GetValueCall = {path: string};
 export type SetValueCall = {path: string, value: boolean | number | string};
 export type AddObjectCall = {path: string};
 export type DeleteObjectCall = {path: string};
-export type FunctionCall = ({
+export type FunctionCall = {
+  __varType: 'FunctionCall';
   type: 'getValue';
   called: GetValueCall;
 } | {
+  __varType: 'FunctionCall';
   type: 'setValue';
   called: SetValueCall;
-} | { 
+} | {
+  __varType: 'FunctionCall';
   type: 'addObject';
   called: AddObjectCall;
 } | {
+  __varType: 'FunctionCall';
   type: 'deleteObject';
   called: DeleteObjectCall;
-}) & {__varType: 'FunctionCall'};
+};
 export type FunctionReturnValue = {
+  __varType: 'FunctionReturnValue';
   type: 'getValue' | 'setValue' | 'addObject' | 'deleteObject';
   path: string;
-  value: number | boolean | string | undefined;
-} & {__varType: 'FunctionReturnValue'};
+  value: number | boolean | string | Array<string> | undefined;
+};
 
 /**
  * This is a map to undo the revision logic from genie. It stores the "revision"
@@ -173,14 +178,14 @@ export class IterationMapCache {
    */
   public getCallReturnValue(
     func: FunctionCall,
-  ): boolean | number | string | undefined {
+  ): boolean | number | string | Array<string> | undefined {
     const stackExec = this.callStack[this.currentRevision];
 
     // Return false if there is no stored call for the current revision
     if (!stackExec) return false;
 
     // If the stored call is not a value, log the error and return undefined
-    if (stackExec && stackExec.__varType !== 'FunctionReturnValue') {
+    if (stackExec.__varType !== 'FunctionReturnValue') {
       console.error(
         'Error: Expected a value for revision ' + this.currentRevision +
         ', but got a function call object: ' + JSON.stringify(stackExec),
@@ -214,7 +219,7 @@ export class IterationMapCache {
    */
   public storeCallReturnValue(
     func: FunctionCall,
-    value: boolean | number | string | undefined,
+    value: boolean | number | string | Array<string> | undefined,
   ): void {
     this.callStack[this.currentRevision] = {
       __varType: 'FunctionReturnValue',
