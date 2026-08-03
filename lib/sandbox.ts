@@ -1229,6 +1229,48 @@ export function updateFirmware(version: string): void {
 }
 
 /**
+ * Return the concrete path of the Internet WAN selected by Flashman.
+ *
+ * @returns The WAN root, ending in a dot, or undefined when it is unavailable.
+ * @throws {Error} If the sandbox is not initialized or the response is invalid.
+ */
+export function getChosenWan(): string | undefined {
+  if (!state.sessionContext.customScriptInfo?.initialized)
+    throw new Error("getChosenWan: Sandbox not initialized");
+
+  const acsId = state.sessionContext.deviceId;
+  const callIndex = `${SandboxDate.now(null, null)}${acsId}`;
+  const response: unknown = ext(
+    "flashman-api",
+    "getChosenWan",
+    acsId,
+    callIndex,
+  );
+
+  if (!response || typeof response !== "object")
+    throw new Error("getChosenWan: Invalid response from Flashman");
+
+  const wanChosenPath = (response as { wanChosenPath?: unknown }).wanChosenPath;
+  if (wanChosenPath === "") return undefined;
+  if (typeof wanChosenPath !== "string")
+    throw new Error("getChosenWan: Invalid response from Flashman");
+
+  const normalizedPath = `${wanChosenPath.replace(/\.+$/, "")}.`;
+  const isValidPath = [
+    /^InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.(?:WANIPConnection|WANPPPConnection)\.\d+\.$/,
+    /^Device\.(?:IP|PPP)\.Interface\.\d+\.$/,
+  ].some((pattern) => pattern.test(normalizedPath));
+
+  if (!isValidPath) {
+    throw new Error(
+      `getChosenWan: Invalid WAN path returned by Flashman: ${wanChosenPath}`,
+    );
+  }
+
+  return normalizedPath;
+}
+
+/**
  * Sends a request to Flashman to inform that a script with the provided tag has
  * been run.
  *
@@ -1473,6 +1515,7 @@ Object.defineProperty(context, "addObject", { value: addObject });
 Object.defineProperty(context, "deleteObject", { value: deleteObject });
 Object.defineProperty(context, "init", { value: init });
 Object.defineProperty(context, "updateFirmware", { value: updateFirmware });
+Object.defineProperty(context, "getChosenWan", { value: getChosenWan });
 
 // Monkey-patch Math.random() to make it deterministic
 context.random = random;
