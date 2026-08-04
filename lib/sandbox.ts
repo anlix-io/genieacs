@@ -909,7 +909,6 @@ export function addObject(
     // Save the value to next iterations
     executionCache.storeCallReturnValue(firstGetParams, unpacked);
     firstGetValue = unpacked
-      .map((treePath) => treePath?.toString())
       .filter((treePath) => !!treePath);
   } else {
     // Case where we already run
@@ -1004,7 +1003,6 @@ export function addObject(
     // Save the value to next iterations
     executionCache.storeCallReturnValue(secondGetParams, unpacked);
     secondGetValue = unpacked
-      .map((treePath) => treePath?.toString())
       .filter((treePath) => !!treePath);
   } else {
     // Case where we already run
