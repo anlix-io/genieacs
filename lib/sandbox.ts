@@ -678,6 +678,8 @@ export function getValue(path: string): boolean | number | string | undefined {
     }
     
     // Send the command to the CPE by forcing a commit
+    // Use a Date.now() value to ensure that the declare will be sent and
+    // doesn't get cached by Genie
     declare(path, { value: Date.now() }, {});
     state.revision = state.maxRevision;
     commit();
@@ -821,8 +823,8 @@ export function setValue(
  * Adds objects at the specified path.
  *
  * @param {string} path - The path where the object should be added.
- * @return {number|undefined} The new size of the objects at the path, or
- * undefined if the operation failed.
+ * @return {string|undefined} The path of the added object, or undefined if the
+ * object could not be added.
  */
 export function addObject(
   path: string,
@@ -886,6 +888,8 @@ export function addObject(
     }
     
     // Send the command to the CPE by forcing a commit
+    // Use a Date.now() value to ensure that the declare will be sent and
+    // doesn't get cached by Genie
     declare(path, { path: Date.now() }, {});
     state.revision = state.maxRevision;
     commit();
@@ -898,7 +902,9 @@ export function addObject(
     const readRevision = Math.max(state.maxRevision, state.revision);
     const parsedPath = Path.parse(path);
     const deviceData: DeviceData = state.sessionContext.deviceData;
-    const unpacked = device.unpack(deviceData, parsedPath, readRevision);
+    const unpacked = device
+      .unpack(deviceData, parsedPath, readRevision)
+      ?.map((treePath) => treePath?.toString());
 
     // Save the value to next iterations
     executionCache.storeCallReturnValue(firstGetParams, unpacked);
@@ -977,6 +983,8 @@ export function addObject(
     }
     
     // Send the command to the CPE by forcing a commit
+    // Use a Date.now() value to ensure that the declare will be sent and
+    // doesn't get cached by Genie
     declare(path, { path: Date.now() }, {});
     state.revision = state.maxRevision;
     commit();
@@ -989,7 +997,9 @@ export function addObject(
     const readRevision = Math.max(state.maxRevision, state.revision);
     const parsedPath = Path.parse(path);
     const deviceData: DeviceData = state.sessionContext.deviceData;
-    const unpacked = device.unpack(deviceData, parsedPath, readRevision);
+    const unpacked = device
+      .unpack(deviceData, parsedPath, readRevision)
+      ?.map((treePath) => treePath?.toString());
 
     // Save the value to next iterations
     executionCache.storeCallReturnValue(secondGetParams, unpacked);

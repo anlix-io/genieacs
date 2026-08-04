@@ -181,8 +181,8 @@ export class IterationMapCache {
   ): boolean | number | string | Array<string> | undefined {
     const stackExec = this.callStack[this.currentRevision];
 
-    // Return false if there is no stored call for the current revision
-    if (!stackExec) return false;
+    // Return undefined if there is no stored call for the current revision
+    if (!stackExec) return undefined;
 
     // If the stored call is not a value, log the error and return undefined
     if (stackExec.__varType !== 'FunctionReturnValue') {
