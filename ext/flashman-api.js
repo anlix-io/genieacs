@@ -823,6 +823,18 @@ async function sendCustomScriptExecutionRequest(args, callback) {
     return callback(null, cacheSendCustomScriptExecutionRequestDATA);
   }
 
+  // Call Redis instead
+  // flashman:customScriptEvents:<<acsId>>
+
+  // If existss proceed, otherwise add to cache and return like the following
+  //cacheSendCustomScriptExecutionRequestIDX = callidx;
+  //cacheSendCustomScriptExecutionRequestDATA = {
+  //  success: true,
+  //  message: 'Nothing to execute. Adding to cache.',
+  //};
+  //return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+
+
   // Send the request to Flashman
   const url = `acs-id/${encodeURIComponent(params.acsId)}/script/initiate`;
   const result = await sendFlashmanRequest('POST', url, params);
