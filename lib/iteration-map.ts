@@ -1,9 +1,30 @@
-export const DeletedValue = Symbol('DeletedValue');
-export type Deleted = typeof DeletedValue;
-export type CachedPrimitive =
-  boolean | string | number | undefined | null | Deleted;
-export type CachedValue = CachedPrimitive | { [key: string]: CachedValue };
-export type CachedValues = { [key: string]: CachedValue };
+export type GetValueCall = {path: string};
+export type SetValueCall = {path: string, value: boolean | number | string};
+export type AddObjectCall = {path: string};
+export type DeleteObjectCall = {path: string};
+export type FunctionCall = {
+  __varType: 'FunctionCall';
+  type: 'getValue';
+  called: GetValueCall;
+} | {
+  __varType: 'FunctionCall';
+  type: 'setValue';
+  called: SetValueCall;
+} | {
+  __varType: 'FunctionCall';
+  type: 'addObject';
+  called: AddObjectCall;
+} | {
+  __varType: 'FunctionCall';
+  type: 'deleteObject';
+  called: DeleteObjectCall;
+};
+export type FunctionReturnValue = {
+  __varType: 'FunctionReturnValue';
+  type: 'getValue' | 'setValue' | 'addObject' | 'deleteObject';
+  path: string;
+  value: number | boolean | string | Array<string> | undefined;
+};
 
 /**
  * This is a map to undo the revision logic from genie. It stores the "revision"
@@ -17,142 +38,20 @@ export type CachedValues = { [key: string]: CachedValue };
  */
 export class IterationMapCache {
   private declare currentRevision: number;
-  private declare valueCache: CachedValues[];
-
-  private readonly SIZE_OBJECT_SUFFIX = '__size';
-  private readonly TIMESTAMP_OBJECT_SUFFIX = '__timestamp';
+  private declare callStack: (FunctionCall | FunctionReturnValue)[];
 
   public constructor() {
     this.currentRevision = 0;
-    this.valueCache = [];
-  }
-
-  private traversePath(
-    path: string,
-    revision?: CachedValues,
-  ): boolean | string | number | undefined | null | Deleted {
-    // If there's no revision provided, nothing to read.
-    if (!revision) return undefined;
-
-    const parts = path.split('.');
-    let current: CachedValues | CachedPrimitive = revision;
-
-    // Loop the part of the path
-    for (const part of parts) {
-      // Continue if the path part is an empty string
-      if (part === '') continue;
-
-      // Return early if the part is not found in the current revision
-      if (current[part] === undefined) return undefined;
-
-      // Return early if the part is marked as deleted
-      if (current[part] === DeletedValue) return DeletedValue;
-
-      // Continue traversing
-      current = current[part] as CachedValues;
-    }
-
-    // Return if found
-    if (
-      typeof current === 'boolean' ||
-      typeof current === 'string' ||
-      typeof current === 'number'
-    ) return current;
-
-    return undefined;
+    this.callStack = [];
   }
 
   /**
-   * Try getting the value of the path in the latest revision, if not found, try
-   * the previous revision and so on until it finds a value or reaches the first
-   * revision.
-   *
-   * @param path The TR-069 parameter path to get the value for.
-   * @param previousRevisionSearch Whether to search in the previous revisions
-   * if the value is not found in the latest revision.
-   *
-   * @returns The value of the parameter in the latest revision, or undefined if
-   * not found.
-   */
-  public getValue(
-    path: string,
-    previousRevisionSearch = true,
-  ): boolean | string | number | undefined | null {
-    // If we only have to search in the latest revision, we can return early
-    // without looping
-    if (!previousRevisionSearch) {
-      const value = this.traversePath(
-        path,
-        this.valueCache[this.currentRevision],
-      );
-
-      // If the value is marked as deleted, return undefined
-      if (value === DeletedValue) return undefined;
-
-      // If the value is found and is not an object, return it, otherwise return
-      // undefined
-      if (value !== undefined && typeof value !== 'object') return value;
-      return undefined;
-    }
-
-    // Otherwise, loop the revisions until we find a value or reach the first
-    // revision
-    for (let revision = this.currentRevision; revision >= 0; --revision) {
-      const value = this.traversePath(path, this.valueCache[revision]);
-      if (value === DeletedValue) return undefined;
-      if (value !== undefined && typeof value !== 'object') return value;
-    }
-
-    return undefined;
-  }
-
-  /**
-   * Save the value of the path in the current revision.
-   *
-   * @param path The TR-069 parameter path to save the value for.
-   * @param value The value to save.
-   */
-  public saveValue(
-    path: string,
-    value: boolean | string | number | null | Deleted,
-  ): void {
-    if (!this.valueCache[this.currentRevision])
-      this.valueCache[this.currentRevision] = {};
-
-    // Split the path into parts and create nested objects if needed
-    const parts = path.split('.').filter((part: string) => part !== '');
-    let current: CachedValues = this.valueCache[this.currentRevision];
-
-    // Loop the part of the path except the last one
-    for (let partIndex = 0; partIndex < parts.length - 1; ++partIndex) {
-      const part = parts[partIndex]?.trim() ?? '';
-
-      // Continue if the path part is an empty string
-      if (part === '') continue;
-
-      // If the part is not found in the current revision or is not an object,
-      // create a new object
-      if (current[part] === undefined || typeof current[part] !== 'object')
-        current[part] = {};
-
-      // Continue traversing the path
-      current = current[part] as CachedValues;
-    }
-
-    // Assign the value to the last part of the path
-    const lastPart = parts[parts.length - 1];
-    current[lastPart] = value;
-  }
-
-  /**
-   * Increment the revision. This should be called after each setValue,
-   * addObject or deleteObject operation to ensure that the next changes are
-   * stored in a new revision.
+   * Increment the revision. This should be called after each getValue,
+   * setValue, addObject and deleteObject operation to ensure that the next
+   * changes are stored in a new revision.
    */
   public incrementRevision(): void {
     this.currentRevision += 1;
-    if (!this.valueCache[this.currentRevision])
-      this.valueCache[this.currentRevision] = {};
   }
 
   /**
@@ -171,182 +70,163 @@ export class IterationMapCache {
   }
 
   /**
-   * Get the timestamp of the object at the given path in the latest revision.
+   * Check if there is a stored call for the current revision, otherwise store
+   * it
    *
-   * @param path The TR-069 parameter path to get the object timestamp for.
-   * @returns The timestamp of the object in the latest revision, or undefined
-   * if not found.
+   * @param func The function call to check if there is a stored call for the
+   *
+   * @returns True if there is a stored call for the current revision, false
+   * otherwise.
    */
-  public getObjectTimestamp(
-    path: string,
-  ): boolean | string | number | undefined | null {
-    return this.getValue(path + this.TIMESTAMP_OBJECT_SUFFIX, false);
-  }
+  public calledFunction(func: FunctionCall): boolean {
+    const call = this.callStack[this.currentRevision];
 
-  /**
-   * Save the timestamp of the object at the given path in the current revision.
-   *
-   * @param path The TR-069 parameter path to save the object timestamp for.
-   * @param timestamp The timestamp to save for the object.
-   */
-  public saveObjectTimestamp(
-    path: string,
-    timestamp: number,
-  ): void {
-    this.saveValue(path + this.TIMESTAMP_OBJECT_SUFFIX, timestamp);
-  }
+    // If there is no stored call for the current revision, store the function
+    // and increments the revision
+    if (!call) {
+      this.callStack[this.currentRevision] = func;
+      this.incrementRevision();
+      return false;
+    };
 
-  /**
-   * Get the value of the added object at the given path in the latest revision.
-   *
-   * @param path The TR-069 parameter path to get the added object value for.
-   * @returns The value of the added object in the latest revision, or undefined
-   * if not found.
-   */
-  public getAddObjectValue(
-    path: string,
-  ): boolean | string | number | undefined | null {
+    // If not a FunctionCall, occurred an error in the previous call, log the
+    // error
+    if (call.__varType !== 'FunctionCall') {
+      console.error(
+        'Error: Expected a function call object for revision ' +
+        this.currentRevision + ', but got a value: ' + call,
+      );
+      return false;
+    }
+
+    // If the store call is different from the current call, log the error and
+    // return false
+    if (call.type !== func.type) {
+      console.error(
+        'Error: Expected a function call of type ' + call.type +
+        ' for revision ' + this.currentRevision + ', but got a call of type ' +
+        func.type,
+      );
+      return false;
+    }
+
+    // If the store call has differente parameters, log the error and return
+    // false
+    if (call.called.path !== func.called.path) {
+      console.error(
+        'Error: Expected a function call with path ' + call.called.path +
+        ' for revision ' + this.currentRevision +
+        ', but got a call with path ' +
+        func.called.path,
+      );
+      return false;
+    }
+
+    // Continue to the next revision
     this.incrementRevision();
-    if (!path.endsWith('.')) path += '.';
-
-    // Check if we must return or let it add again
-    const shouldAdd =
-      this.getValue(path + this.SIZE_OBJECT_SUFFIX, false) === undefined;
-
-    // Return the last size if it exists
-    return shouldAdd ?
-      undefined :
-      this.getValue(path + this.SIZE_OBJECT_SUFFIX);
+    return true;
   }
 
   /**
-   * Get the value of the deleted object at the given path in the latest
+   * Check if there is a stored call value for the current revision. This should
+   * be called after each getValue, setValue, addObject and deleteObject
+   * operation to check if there is a stored call value for the current
    * revision.
    *
-   * @param path The TR-069 parameter path to get the deleted object value for.
-   * @returns The value of the deleted object in the latest revision, or
-   * undefined if not found.
+   * @param func The function call to check if there is a stored call value for
+   *
+   * @returns True if there is a stored call value for the current revision,
+   * false otherwise.
    */
-  public getDeleteObjectValue(
-    path: string,
-  ): boolean | string | number | undefined | null {
+  public hasCallReturnValue(func: FunctionCall): boolean {
+    const value = this.callStack[this.currentRevision];
+
+    // Return false if there is no stored call for the current revision
+    if (!value) return false;
+
+    // If the stored call is not a value, log the error and return false
+    if (value.__varType !== 'FunctionReturnValue') {
+      console.error(
+        'Error: Expected a value for revision ' + this.currentRevision +
+        ', but got a function call object: ' + JSON.stringify(value),
+      );
+      return false;
+    }
+
+    // If the stored call is a value, check if it is the same type and path as
+    // the current function call
+    if (value.type !== func.type || value.path !== func.called.path) {
+      console.error(
+        'Error: Expected a value for revision ' + this.currentRevision +
+        ' with type ' + func.type + ' and path ' + func.called.path +
+        ', but got a value with type ' + value.type + ' and path ' +
+        value.path,
+      );
+      return false;
+    }
+
+    return value !== undefined;
+  }
+  
+  /**
+   * Get the stored call value for the current revision. This should be called
+   * after each getValue, setValue, addObject and deleteObject operation to
+   * ensure that the next changes are stored in a new revision.
+   *
+   * @returns The stored call value for the current revision, or undefined if
+   * there is no stored call for the current revision.
+   */
+  public getCallReturnValue(
+    func: FunctionCall,
+  ): boolean | number | string | Array<string> | undefined {
+    const stackExec = this.callStack[this.currentRevision];
+
+    // Return undefined if there is no stored call for the current revision
+    if (!stackExec) return undefined;
+
+    // If the stored call is not a value, log the error and return undefined
+    if (stackExec.__varType !== 'FunctionReturnValue') {
+      console.error(
+        'Error: Expected a value for revision ' + this.currentRevision +
+        ', but got a function call object: ' + JSON.stringify(stackExec),
+      );
+      return undefined;
+    }
+
+    // If the stored call is a value, check if it is the same type and path as
+    // the current function call
+    if (stackExec.type !== func.type || stackExec.path !== func.called.path) {
+      console.error(
+        'Error: Expected a value for revision ' + this.currentRevision +
+        ' with type ' + func.type + ' and path ' + func.called.path +
+        ', but got a value with type ' + stackExec.type + ' and path ' +
+        stackExec.path,
+      );
+      return undefined;
+    }
+
     this.incrementRevision();
-
-    // Get the last part of the path
-    const lastPart = path
-      .split('.')
-      .filter((part: string) => part !== '')
-      .slice(-1)[0];
-
-    // If it ends with a number, change it to *
-    if (lastPart && !isNaN(Number(lastPart)))
-      path = path.slice(0, -lastPart.length) + '*';
-
-    // If not trailing dot, add it
-    if (!path.endsWith('.')) path += '.';
-
-    // Check if we must return or let it delete again
-    const shouldDelete =
-      this.getValue(path + this.SIZE_OBJECT_SUFFIX, false) === undefined;
-
-    // Return the last size if it exists
-    return shouldDelete ?
-      undefined :
-      this.getValue(path + this.SIZE_OBJECT_SUFFIX);
+    return stackExec.value;
   }
 
   /**
-   * Get the size of the object at the given path in the revisions
+   * Store a call value for the current revision. This should be called after
+   * each getValue, setValue, addObject and deleteObject operation to ensure
+   * that the next changes are stored in a new revision.
    *
-   * @param path - The TR-069 parameter path to get the object size for.
+   * @param value The value to store for the current revision. It can be a
+   * boolean, number or string.
    */
-  public getObjectSize(
-    path: string,
-  ): boolean | string | number | undefined | null {
-    // Get the last part of the path
-    const lastPart = path
-      .split('.')
-      .filter((part: string) => part !== '')
-      .slice(-1)[0];
-
-    // If it ends with a number, change it to *
-    if (lastPart && !isNaN(Number(lastPart)))
-      path = path.slice(0, -lastPart.length) + '*';
-
-    // If not trailing dot, add it
-    if (!path.endsWith('.')) path += '.';
-    return this.getValue(path + this.SIZE_OBJECT_SUFFIX);
-  }
-
-  /**
-   * Get the value of the setted value at the given path in the latest revision.
-   *
-   * @param path The TR-069 parameter path to get the setted value for.
-   * @returns The value of the setted value in the latest revision, or
-   * undefined if not found.
-   */
-  public getSettedValue(
-    path: string,
-  ): boolean | string | number | undefined | null {
-    this.incrementRevision();
-    return this.getValue(path);
-  }
-
-  /**
-   * Set the value of the path and increment the revision. This is a convenience
-   * method that combines saveValue and incrementRevision, so that you can set a
-   * value and automatically move to the next revision.
-   *
-   * @param path The TR-069 parameter path to set the value for.
-   * @param value The value to set.
-   */
-  public setValue(
-    path: string, value: boolean | string | number
+  public storeCallReturnValue(
+    func: FunctionCall,
+    value: boolean | number | string | Array<string> | undefined,
   ): void {
-    this.saveValue(path, value);
-  }
-
-  /**
-   * Add an object at the given path with the given value.
-   *
-   * @param path The TR-069 parameter path to add the object at.
-   * @param amount The amount of the object to add.
-   */
-  public addObject(path: string, amount: boolean | string | number): void {
-    if (!path.endsWith('.')) path += '.';
-    this.saveValue(path + this.SIZE_OBJECT_SUFFIX, amount);
-  }
-
-  /**
-   * Delete an object at the given path. It also clears all the values that
-   * start with the path in the current revision to avoid returning already
-   * deleted objects/values.
-   *
-   * @param path The TR-069 parameter path to delete the object at.
-   * @param amount The amount of the object to delete.
-   */
-  public deleteObject(path: string, amount: boolean | string | number): void {
-    // Clear the structure of the deleted object in the current revision to
-    // avoid returning already deleted objects/values
-    // Build the path with DeletedValue in the last part to mark it as deleted
-    const basePath = path.split('*')[0];
-    this.saveValue(basePath, DeletedValue);
-
-    // Get the last part of the path
-    const lastPart = path
-      .split('.')
-      .filter((part: string) => part !== '')
-      .slice(-1)[0];
-
-    // If it ends with a number, change it to *
-    if (lastPart && !isNaN(Number(lastPart)))
-      path = path.slice(0, -lastPart.length) + '*';
-
-    // If not trailing dot, add it
-    if (!path.endsWith('.')) path += '.';
-
-    // Save the amount to return it when getDeleteObjectValue is called with the
-    // path of the deleted
-    this.saveValue(path + this.SIZE_OBJECT_SUFFIX, amount);
+    this.callStack[this.currentRevision] = {
+      __varType: 'FunctionReturnValue',
+      type: func.type,
+      path: func.called.path,
+      value,
+    };
+    this.incrementRevision();
   }
 }

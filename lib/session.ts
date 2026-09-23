@@ -3047,6 +3047,9 @@ export async function rpcFault(
     detail: faultResponse.detail,
   };
 
+  // Send the logs to flashman if there are any
+  sendInfoToFlashman(sessionContext, fault);
+
   return fault;
 }
 
