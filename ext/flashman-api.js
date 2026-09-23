@@ -21,8 +21,8 @@ const INSTANCES_COUNT = 1;
 const FLASHMAN_PORT = (process.env.FLM_WEB_PORT || 8000);
 const API_URL =
   'http://' + (process.env.FLM_WEB_HOST || 'localhost') + ':$PORT/acs/';
-const REDISHOST = '127.0.0.1';
-const REDISPORT = 6379;
+const REDIS_CONNECTION_URL =
+  (process.env.GENIEACS_REDIS_CONNECTION_URL || 'redis://redis:6379');
 const CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX = 'flashman:customScriptEvents:';
 
 const request = require('request');
@@ -37,7 +37,7 @@ const connectRedis = function() {
     return Promise.resolve(redisClient);
   }
   redisClient = redis.createClient({
-    url: `redis://${REDISHOST}:${REDISPORT}`,
+    url: REDIS_CONNECTION_URL,
     socket: {
       reconnectStrategy: (retries) => {
         // Give up after 2 attempts so callers fail fast and fall back
