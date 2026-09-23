@@ -25,7 +25,7 @@ const CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX = 'flashman:customScriptEvents:';
 
 const request = require('request');
 
-import * as redisClient from './redis';
+import * as redisClient from '../lib/redis';
 
 
 let cacheDeviceFieldsIDX = '';
