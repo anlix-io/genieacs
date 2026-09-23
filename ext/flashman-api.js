@@ -30,12 +30,20 @@ const redis = require('redis');
 
 let redisClient;
 const connectRedis = function() {
-  if (redisClient) {
-    console.log('Using existing Redis connection');
-    return redisClient;
+  // Reuse the client only if it exists and its connection is still open,
+  // otherwise recreate it (a closed client would make commands throw
+  // "The client is closed")
+  if (redisClient && redisClient.isOpen) {
+    return Promise.resolve(redisClient);
   }
   redisClient = redis.createClient({
     url: `redis://${REDISHOST}:${REDISPORT}`,
+    socket: {
+      reconnectStrategy: (retries) => {
+        // Give up after 2 attempts so callers fail fast and fall back
+        return retries < 2 ? 100 : false;
+      },
+    },
   });
   return new Promise((resolve, reject) => {
     redisClient.connect().then(() => {
@@ -43,6 +51,9 @@ const connectRedis = function() {
       resolve(redisClient);
     }).catch((err) => {
       console.error('Error on connecting to Redis: ' + err);
+      // Reset so the next call tries a fresh connection instead of
+      // returning a closed client
+      redisClient = undefined;
       reject(err);
     });
   });
@@ -855,16 +866,22 @@ async function sendCustomScriptExecutionRequest(args, callback) {
     console.error('Redis unavailable: ' + error);
   }
   if (redisReady) {
-    let eventCount = await redisClient.lLen(
-      CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX + params.acsId,
-    );
-    if (eventCount === 0) {
-      cacheSendCustomScriptExecutionRequestIDX = callidx;
-      cacheSendCustomScriptExecutionRequestDATA = {
-        success: true,
-        message: 'Nothing to execute. Adding to cache.',
-      };
-      return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+    try {
+      let eventCount = await redisClient.lLen(
+        CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX + params.acsId,
+      );
+      if (eventCount === 0) {
+        cacheSendCustomScriptExecutionRequestIDX = callidx;
+        cacheSendCustomScriptExecutionRequestDATA = {
+          success: true,
+          message: 'Nothing to execute. Adding to cache.',
+        };
+        return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+      }
+    } catch (error) {
+      // Redis went down between the connection check and the command;
+      // fall through and proceed with the Flashman request
+      console.error('Error checking Redis events: ' + error);
     }
   }
 
