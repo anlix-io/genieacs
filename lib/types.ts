@@ -21,8 +21,8 @@ import Path from "./common/path";
 import PathSet from "./common/path-set";
 import VersionedMap from "./versioned-map";
 import InstanceSet from "./instance-set";
-import { IncomingMessage, ServerResponse } from "http";
-import { Script } from "vm";
+import { IncomingMessage, ServerResponse } from "node:http";
+import { Script } from "node:vm";
 import { IterationMapCache } from "./iteration-map";
 
 export type Expression = string | number | boolean | null | any[];
@@ -169,7 +169,6 @@ export interface SessionContext {
   authState: number;
   tasks?: Task[];
   operations?: { [commandKey: string]: Operation };
-  cacheUntil?: number;
   syncState?: SyncState;
   lastActivity?: number;
   extendLock?: number;

@@ -1,22 +1,4 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
-import * as logger from "./logger";
+import * as logger from "./logger.ts";
 
 const NONEXISTENT = Symbol();
 const UNDEFINED = undefined;
@@ -136,7 +118,7 @@ export default class VersionedMap<K, V> {
     return res;
   }
 
-  public setRevisions(key: K, revisionsObj: Revisions<V>, deviceId = ''): void {
+  public setRevisions(key: K, revisionsObj: Revisions<V>, deviceId = ""): void {
     const del = revisionsObj.delete || 0;
     const mutations = Object.keys(revisionsObj).reduce(
       (acc, cur) => (cur === "delete" ? acc : acc | (1 << +cur)),
@@ -147,12 +129,12 @@ export default class VersionedMap<K, V> {
 
     if (Object.keys(revisionsObj)?.length > 31) {
       logger.warn({
-        message:`Device ${deviceId} would trigger infinite loop`
+        message: `Device ${deviceId} would trigger infinite loop`,
       });
     }
 
     let prev: V | symbol = NONEXISTENT;
-    for (let i = 0; ((mutations >> i) > 0 || (mutations >> i) < -1); ++i) {
+    for (let i = 0; mutations >> i > 0 || mutations >> i < -1; ++i) {
       let v = prev;
       if (del & (1 << i)) v = NONEXISTENT;
       else if (i in revisionsObj) v = revisionsObj[i];

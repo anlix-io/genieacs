@@ -1,30 +1,11 @@
-/**
- * Copyright 2013-2019  GenieACS Inc.
- *
- * This file is part of GenieACS.
- *
- * GenieACS is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Affero General Public License as
- * published by the Free Software Foundation, either version 3 of the
- * License, or (at your option) any later version.
- *
- * GenieACS is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU Affero General Public License for more details.
- *
- * You should have received a copy of the GNU Affero General Public License
- * along with GenieACS.  If not, see <http://www.gnu.org/licenses/>.
- */
-
-import { spawn, ChildProcess } from "child_process";
-import * as crypto from "crypto";
-import * as config from "./config";
-import { Fault } from "./types";
-import { ROOT_DIR } from "./config";
-import * as logger from "./logger";
-import * as readline from "readline";
-import { metricsExporter } from "./metrics";
+import { spawn, ChildProcess } from "node:child_process";
+import * as crypto from "node:crypto";
+import readline from "node:readline";
+import * as config from "./config.ts";
+import { Fault } from "./types.ts";
+import { ROOT_DIR } from "./config.ts";
+import * as logger from "./logger.ts";
+import { metricsExporter } from "./metrics.ts";
 
 const TIMEOUT = +config.get("EXT_TIMEOUT");
 
@@ -33,11 +14,10 @@ const jobs = new Map();
 
 export function run(args: string[]): Promise<{ fault: Fault; value: any }> {
   const scriptName = args[0];
-  const endTimer =
-    metricsExporter.extensionDuration
-    .labels({script_name:scriptName}).startTimer()
+  const endTimer = metricsExporter.extensionDuration
+    .labels({ script_name: scriptName })
+    .startTimer();
   return new Promise((resolve) => {
-
     const id = crypto.randomBytes(8).toString("hex");
     jobs.set(id, resolve);
 
