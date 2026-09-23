@@ -19,10 +19,13 @@ const INSTANCES_COUNT = 1;
  environment.genieacs.json or in shell environment with the same value
  that is in environment.config.json */
 const FLASHMAN_PORT = (process.env.FLM_WEB_PORT || 8000);
-const API_URL = 'http://'+(process.env.FLM_WEB_HOST || 'localhost')
-  +':$PORT/acs/';
+const API_URL =
+  'http://' + (process.env.FLM_WEB_HOST || 'localhost') + ':$PORT/acs/';
+const CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX = 'flashman:customScriptEvents:';
 
 const request = require('request');
+
+import * as redisClient from './redis';
 
 
 let cacheDeviceFieldsIDX = '';
@@ -823,17 +826,21 @@ async function sendCustomScriptExecutionRequest(args, callback) {
     return callback(null, cacheSendCustomScriptExecutionRequestDATA);
   }
 
-  // Call Redis instead
-  // flashman:customScriptEvents:<<acsId>>
-
-  // If existss proceed, otherwise add to cache and return like the following
-  //cacheSendCustomScriptExecutionRequestIDX = callidx;
-  //cacheSendCustomScriptExecutionRequestDATA = {
-  //  success: true,
-  //  message: 'Nothing to execute. Adding to cache.',
-  //};
-  //return callback(null, cacheSendCustomScriptExecutionRequestDATA);
-
+  // Check if there are events on Redis (if online) for the given ACS ID
+  // If exists proceed, otherwise add to cache and return
+  if (redisClient.online()) {
+    let eventCount = await redisClient.lLen(
+      CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX + params.acsId,
+    );
+    if (eventCount === 0) {
+      cacheSendCustomScriptExecutionRequestIDX = callidx;
+      cacheSendCustomScriptExecutionRequestDATA = {
+        success: true,
+        message: 'Nothing to execute. Adding to cache.',
+      };
+      return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+    }
+  }
 
   // Send the request to Flashman
   const url = `acs-id/${encodeURIComponent(params.acsId)}/script/initiate`;
