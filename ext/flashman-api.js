@@ -21,12 +21,32 @@ const INSTANCES_COUNT = 1;
 const FLASHMAN_PORT = (process.env.FLM_WEB_PORT || 8000);
 const API_URL =
   'http://' + (process.env.FLM_WEB_HOST || 'localhost') + ':$PORT/acs/';
+const REDISHOST = '127.0.0.1';
+const REDISPORT = 6379;
 const CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX = 'flashman:customScriptEvents:';
 
 const request = require('request');
+const redis = require('redis');
 
-import * as redisClient from '../lib/redis';
-
+let redisClient;
+const connectRedis = function() {
+  if (redisClient) {
+    console.log('Using existing Redis connection');
+    return redisClient;
+  }
+  redisClient = redis.createClient({
+    url: `redis://${REDISHOST}:${REDISPORT}`,
+  });
+  return new Promise((resolve, reject) => {
+    redisClient.connect().then(() => {
+      console.log('Successfully connected to Redis');
+      resolve(redisClient);
+    }).catch((err) => {
+      console.error('Error on connecting to Redis: ' + err);
+      reject(err);
+    });
+  });
+}
 
 let cacheDeviceFieldsIDX = '';
 let cacheDeviceFieldsDATA = {};
@@ -828,7 +848,13 @@ async function sendCustomScriptExecutionRequest(args, callback) {
 
   // Check if there are events on Redis (if online) for the given ACS ID
   // If exists proceed, otherwise add to cache and return
-  if (redisClient.online()) {
+  let redisReady = false;
+  try {
+    redisReady = !!(await connectRedis());
+  } catch (error) {
+    console.error('Redis unavailable: ' + error);
+  }
+  if (redisReady) {
     let eventCount = await redisClient.lLen(
       CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX + params.acsId,
     );
