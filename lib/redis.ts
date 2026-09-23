@@ -48,6 +48,10 @@ export async function getList(key: string): Promise<string[]> {
   return Client.lRange(key, 0, -1);
 }
 
+export async function lLen(key: string): Promise<number> {
+  return Client.lLen(key);
+}
+
 export async function setWithExpire(
   key: string,
   value: string,
