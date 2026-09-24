@@ -19,11 +19,45 @@ const INSTANCES_COUNT = 1;
  environment.genieacs.json or in shell environment with the same value
  that is in environment.config.json */
 const FLASHMAN_PORT = (process.env.FLM_WEB_PORT || 8000);
-const API_URL = 'http://'+(process.env.FLM_WEB_HOST || 'localhost')
-  +':$PORT/acs/';
+const API_URL =
+  'http://' + (process.env.FLM_WEB_HOST || 'localhost') + ':$PORT/acs/';
+const REDIS_CONNECTION_URL =
+  (process.env.GENIEACS_REDIS_CONNECTION_URL || 'redis://redis:6379');
+const CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX = 'flashman:customScriptEvents:';
 
 const request = require('request');
+const redis = require('redis');
 
+let redisClient;
+const connectRedis = function() {
+  // Reuse the client only if it exists and its connection is still open,
+  // otherwise recreate it (a closed client would make commands throw
+  // "The client is closed")
+  if (redisClient && redisClient.isOpen) {
+    return Promise.resolve(redisClient);
+  }
+  redisClient = redis.createClient({
+    url: REDIS_CONNECTION_URL,
+    socket: {
+      reconnectStrategy: (retries) => {
+        // Give up after 2 attempts so callers fail fast and fall back
+        return retries < 2 ? 100 : false;
+      },
+    },
+  });
+  return new Promise((resolve, reject) => {
+    redisClient.connect().then(() => {
+      console.log('Successfully connected to Redis');
+      resolve(redisClient);
+    }).catch((err) => {
+      console.error('Error on connecting to Redis: ' + err);
+      // Reset so the next call tries a fresh connection instead of
+      // returning a closed client
+      redisClient = undefined;
+      reject(err);
+    });
+  });
+}
 
 let cacheDeviceFieldsIDX = '';
 let cacheDeviceFieldsDATA = {};
@@ -821,6 +855,34 @@ async function sendCustomScriptExecutionRequest(args, callback) {
       message: 'Incomplete arguments in sendCustomScriptExecutionRequest',
     };
     return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+  }
+
+  // Check if there are events on Redis (if online) for the given ACS ID
+  // If exists proceed, otherwise add to cache and return
+  let redisReady = false;
+  try {
+    redisReady = !!(await connectRedis());
+  } catch (error) {
+    console.error('Redis unavailable: ' + error);
+  }
+  if (redisReady) {
+    try {
+      let eventCount = await redisClient.lLen(
+        CUSTOM_SCRIPT_EVENTS_REDIS_PREFIX + params.acsId,
+      );
+      if (eventCount === 0) {
+        cacheSendCustomScriptExecutionRequestIDX = callidx;
+        cacheSendCustomScriptExecutionRequestDATA = {
+          success: true,
+          message: 'Nothing to execute. Adding to cache.',
+        };
+        return callback(null, cacheSendCustomScriptExecutionRequestDATA);
+      }
+    } catch (error) {
+      // Redis went down between the connection check and the command;
+      // fall through and proceed with the Flashman request
+      console.error('Error checking Redis events: ' + error);
+    }
   }
 
   // Send the request to Flashman
