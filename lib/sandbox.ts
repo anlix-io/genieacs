@@ -1236,33 +1236,36 @@ export function updateFirmware(version: string): void {
 }
 
 /**
- * Return the concrete path of the Internet WAN selected by Flashman.
+ * Return the concrete path of the WAN selected by Flashman.
  *
  * @returns The WAN root, ending in a dot, or undefined when it is unavailable.
  * @throws {Error} If the sandbox is not initialized or the response is invalid.
  */
-export function getChosenWan(): string | undefined {
+function getWanPath(
+  extensionName: "getChosenWan" | "getTr069Wan",
+  responseProperty: "wanChosenPath" | "tr069WanPath",
+): string | undefined {
   if (!state.sessionContext.customScriptInfo?.initialized)
-    throw new Error("getChosenWan: Sandbox not initialized");
+    throw new Error(`${extensionName}: Sandbox not initialized`);
 
   const acsId = state.sessionContext.deviceId;
   const callIndex = `${SandboxDate.now(null, null)}${acsId}`;
   const response: unknown = ext(
     "flashman-api",
-    "getChosenWan",
+    extensionName,
     acsId,
     callIndex,
   );
 
   if (!response || typeof response !== "object")
-    throw new Error("getChosenWan: Invalid response from Flashman");
+    throw new Error(`${extensionName}: Invalid response from Flashman`);
 
-  const wanChosenPath = (response as { wanChosenPath?: unknown }).wanChosenPath;
-  if (wanChosenPath === "") return undefined;
-  if (typeof wanChosenPath !== "string")
-    throw new Error("getChosenWan: Invalid response from Flashman");
+  const wanPath = (response as Record<string, unknown>)[responseProperty];
+  if (wanPath === "") return undefined;
+  if (typeof wanPath !== "string")
+    throw new Error(`${extensionName}: Invalid response from Flashman`);
 
-  const normalizedPath = `${wanChosenPath.replace(/\.+$/, "")}.`;
+  const normalizedPath = `${wanPath.replace(/\.+$/, "")}.`;
   const isValidPath = [
     /^InternetGatewayDevice\.WANDevice\.\d+\.WANConnectionDevice\.\d+\.(?:WANIPConnection|WANPPPConnection)\.\d+\.$/,
     /^Device\.(?:IP|PPP)\.Interface\.\d+\.$/,
@@ -1270,11 +1273,31 @@ export function getChosenWan(): string | undefined {
 
   if (!isValidPath) {
     throw new Error(
-      `getChosenWan: Invalid WAN path returned by Flashman: ${wanChosenPath}`,
+      `${extensionName}: Invalid WAN path returned by Flashman: ${wanPath}`,
     );
   }
 
   return normalizedPath;
+}
+
+/**
+ * Return the concrete path of the Internet WAN selected by Flashman.
+ *
+ * @returns The WAN root, ending in a dot, or undefined when it is unavailable.
+ * @throws {Error} If the sandbox is not initialized or the response is invalid.
+ */
+export function getChosenWan(): string | undefined {
+  return getWanPath("getChosenWan", "wanChosenPath");
+}
+
+/**
+ * Return the concrete TR-069 WAN path selected by Flashman.
+ * 
+ * @returns The WAN root, ending in a dot, or undefined when it is unavailable.
+ * @throws {Error} If the sandbox is not initialized or the response is invalid.
+ */
+export function getTr069Wan(): string | undefined {
+  return getWanPath("getTr069Wan", "tr069WanPath");
 }
 
 /**
@@ -1523,6 +1546,7 @@ Object.defineProperty(context, "deleteObject", { value: deleteObject });
 Object.defineProperty(context, "init", { value: init });
 Object.defineProperty(context, "updateFirmware", { value: updateFirmware });
 Object.defineProperty(context, "getChosenWan", { value: getChosenWan });
+Object.defineProperty(context, "getTr069Wan", { value: getTr069Wan });
 
 // Monkey-patch Math.random() to make it deterministic
 context.random = random;
