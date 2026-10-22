@@ -586,31 +586,85 @@ const getMultiLanProvision = async function(args, callback) {
   callback(null, index);
 };
 
-let cacheGetChosenWanIDX = '';
-let cacheGetChosenWanDATA = {};
-const getChosenWan = async function(args, callback) {
+const getWan = async function(
+  args,
+  callback,
+  route,
+  responseProperty,
+  cache,
+) {
   const acsID = args[0];
   const callidx = args[1];
 
-  // Avoid call to flashman twice from provision
-  if (cacheGetChosenWanIDX === callidx) {
-    return callback(null, cacheGetChosenWanDATA);
+  if (cache.idx === callidx) {
+    return callback(null, cache.data);
   }
 
   const result = await sendFlashmanRequest(
     'GET',
-    `acs-id/${encodeURIComponent(acsID)}/wan-chosen`,
+    `acs-id/${encodeURIComponent(acsID)}/${route}`,
     {},
   );
 
-  let wanChosenPath = '';
-  if (result && result.success && result.data && result.data.wanChosenPath) {
-    wanChosenPath = result.data.wanChosenPath;
+  let wanPath = '';
+  if (result && result.success && result.data && result.data[responseProperty]) {
+    wanPath = result.data[responseProperty];
   }
 
-  cacheGetChosenWanIDX = callidx;
-  cacheGetChosenWanDATA = {wanChosenPath};
-  callback(null, {wanChosenPath});
+  cache.idx = callidx;
+  cache.data = {[responseProperty]: wanPath};
+  callback(null, cache.data);
+};
+
+let cacheGetChosenWanIDX = '';
+let cacheGetChosenWanDATA = {};
+let cacheGetTr069WanIDX = '';
+let cacheGetTr069WanDATA = {};
+
+const getChosenWan = function(args, callback) {
+  return getWan(
+    args,
+    callback,
+    'wan-chosen',
+    'wanChosenPath',
+    {
+      get idx() {
+        return cacheGetChosenWanIDX;
+      },
+      set idx(value) {
+        cacheGetChosenWanIDX = value;
+      },
+      get data() {
+        return cacheGetChosenWanDATA;
+      },
+      set data(value) {
+        cacheGetChosenWanDATA = value;
+      },
+    },
+  );
+};
+
+const getTr069Wan = async function(args, callback) {
+  return getWan(
+    args,
+    callback,
+    'wan-tr069',
+    'tr069WanPath',
+    {
+      get idx() {
+        return cacheGetTr069WanIDX;
+      },
+      set idx(value) {
+        cacheGetTr069WanIDX = value;
+      },
+      get data() {
+        return cacheGetTr069WanDATA;
+      },
+      set data(value) {
+        cacheGetTr069WanDATA = value;
+      },
+    },
+  );
 };
 
 let cacheGetMACFieldIDX = '';
@@ -910,6 +964,7 @@ exports.doFlashmanSync = doFlashmanSync;
 exports.syncDeviceData = syncDeviceData;
 exports.syncDeviceDiagnostics = syncDeviceDiagnostics;
 exports.getChosenWan = getChosenWan;
+exports.getTr069Wan = getTr069Wan;
 exports.getMACField = getMACField;
 exports.getFirmwareFile = getFirmwareFile;
 exports.sendCustomScriptEvent = sendCustomScriptEvent;
